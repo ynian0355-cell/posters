@@ -149,7 +149,7 @@ const FX_ = { flash: 0, shake: 0, cutFlash: 0, cutLine: null, windLines: [], sna
 const G = {
   charging: false, charge: 0, fistT: 0, openRiseT: -1,
   snapping: 0, bloomV: 0,
-  lah: 0, lahT: 0, lahAng: 0, lahAngT: 0, lahN: 0, thru: 0, thruT: 0, back: 0, backT: 0, dep: 0, depT: 0, idle: 0, demo: false, demoLabel: '', demoDone: false, ptrFold: false,
+  lah: 0, lahT: 0, cup: 0, cupT: 0, lahAng: 0, lahAngT: 0, lahN: 0, thru: 0, thruT: 0, back: 0, backT: 0, dep: 0, depT: 0, idle: 0, demo: false, demoLabel: '', demoDone: false, ptrFold: false,
   windDir: 0, windFront: null, windCool: 0, gust: 0, windBack: false, looseN: 0,
   cutting: false, blade: null, bladeShow: null, cutPath: [], snipT: 0, lastCut: -99, detached: 0,
   foldT: 0, ptrRecent: -99, status: '', hintKey: ''
@@ -177,20 +177,25 @@ function step(dt) {
   G.status = statusText();
 }
 
-// 没人的时候：自己按分镜演一遍，告诉观众每一步是什么手势
-const DEMO = [[0, 2, '握拳'], [2, 4.2, '张开手'], [4.2, 7.6, '手往后拉'], [7.6, 9.2, '拉到底'], [9.2, 11.2, '手往前推'], [11.2, 13.2, '再往前推 · 穿进花心'], [13.2, 15.2, '握拳']];
+// 没人的时候：自己按分镜演一遍整套连招，告诉观众每一步是什么手势
+const DEMO = [[0, 2, '握拳'], [2, 4.2, '张开手'], [4.2, 7.2, '手往后拉'], [7.2, 9.2, '往前推 · 飘回来'],
+  [9.2, 11.4, '双手捧住'], [11.4, 13.8, '双手往两边拉开'], [13.8, 17, '拉到最开'], [17, 19.4, '双手合拢'],
+  [19.4, 21.4, '穿进花心'], [21.4, 23.4, '握拳']];
+const DEMO_LEN = 23.4;
 function demoUpdate(dt) {
-  if (CAM.hands.length || PTR.active) { G.idle = 0; if (G.demo) { G.demo = false; G.thruT = 0; G.depT = 0; } return; }
+  if (CAM.hands.length || PTR.active) { G.idle = 0; if (G.demo) { G.demo = false; G.thruT = 0; G.depT = 0; G.lahT = 0; G.cupT = 0; } return; }
   G.idle += dt;
   if (G.idle < 8) return;
   G.demo = true;
-  const t = (G.idle - 8) % 15.2;
+  const t = (G.idle - 8) % DEMO_LEN;
   let i = 0; while (i < DEMO.length - 1 && t >= DEMO[i][1]) i++;
   G.demoLabel = DEMO[i][2];
   rotT = 0; L3.yawT = 0; L3.pitchT = 0;
-  bloomT = (i === 0 || i === 6) ? 0.05 : 1;
-  G.depT = (i === 2 || i === 3) ? 1 : 0;
-  if (i === 5) { if (!G.demoDone) G.thruT = 1; if (G.thru > 0.985) { G.thru = 0; G.thruT = 0; G.demoDone = true; } }
+  bloomT = (i === 0 || i === 9) ? 0.05 : 1;
+  G.depT = i === 2 ? 1 : 0;
+  G.cupT = i === 4 ? 1 : 0;
+  G.lahT = i === 5 ? 0.5 : i === 6 ? 1 : 0;
+  if (i === 8) { if (!G.demoDone) G.thruT = 1; if (G.thru > 0.985) { G.thru = 0; G.thruT = 0; G.demoDone = true; } }
   else { G.thruT = 0; G.demoDone = false; }
 }
 function damp(a, b, rate, dt) { return a + (b - a) * (1 - Math.exp(-rate * dt)); }
@@ -236,74 +241,76 @@ function updateBloom(dt) {
 }
 
 // =============================================================
-//  一变多：两手拉开的距离 = 第几级
-//    0  一个团花
-//    1  对折：像纸对折再撕开，翻过去裂成两个，一个顺转一个逆转
-//    2  发射：两个甩出去绕成一圈六个，大小一圈圈渐变，整圈在转
-//    3  窗花墙：镜头猛地往后拉，原来这一圈只是一整面窗花墙的一小块
-//  两手合拢 = 倒着放：镜头推进，冲到眼前，只剩一个
-//  每一下都是快出、到位就停，不回弹
+//  一变六 → 满屏：两手拉开的距离（0..1）
+//    0  一朵团花（两手捧在一起时：亮一下、浮起来一点）
+//    1  一变六：六朵一样大，围成一圈（六六大顺、团圆）
+//    2  满屏：中间六朵留在原位，四周的团花从中心长出去，大小、角度、疏密不一，近大亮、远小淡
+//  两手合拢 = 倒着放：四周的先收回中心，六朵再聚成一朵。全程跟手，到位就停，不回弹
 // =============================================================
-const SPL = { lv: 0, n: 1, Z: 1, Zt: 1, slots: [], tiles: [] };
-const RING_R = 190, RING_ANG = [180, 0, 120, 300, 240, 60];   // 偶数号是左边那个生的，奇数号是右边那个生的
+const SPL = { lv: 0, n: 1, Z: 1, Zt: 1, W: 0, slots: [], tiles: [] };
+const RING_R = 175, RING_S = 0.31, RING_ANG = [270, 330, 30, 90, 150, 210];
 for (let k = 0; k < 6; k++) SPL.slots.push({ x: 0, y: 0, s: 1, a: k ? 0 : 1, flip: 0, rot: 0, ta: k ? 0 : 1, live: k === 0 });
-(function makeWall() {                            // 四方连续：错位排开，大小和转向交替，中间留给那一圈
-  const D = 430, H = D * 0.866;
-  for (let j = -5; j <= 5; j++) for (let i = -4; i <= 4; i++) {
-    const x = (i + (j & 1 ? 0.5 : 0)) * D, y = j * H;
-    const h1 = Math.sin(i * 12.9898 + j * 78.233) * 43758.5453, h2 = Math.sin(i * 39.346 + j * 11.135) * 24634.6345;
-    const rx = (h1 - Math.floor(h1)) - 0.5, ry = (h2 - Math.floor(h2)) - 0.5;      // 每朵错开一点，不排成一行行
-    const xx = x + rx * D * 0.55, yy = y + ry * H * 0.55;
-    if (Math.hypot(xx, yy) < 340) continue;
-    SPL.tiles.push({ x: xx, y: yy, s: 0.5 + 0.42 * ((rx + ry + 1) * 0.5), dir: (i + j) & 1 ? 1 : -1, ph: (i * 7 + j * 3) % 6 });
+(function makeWall() {                            // 满屏 C：远近散布（定好的那张图）
+  let sd = 11; const rnd = () => { sd = (sd * 16807) % 2147483647; return (sd - 1) / 2147483646; };
+  const cx = VW / 2, cy = VH * 0.52, pts = [];
+  for (let k = 0; k < 6; k++) { const a = RING_ANG[k] * Math.PI / 180; pts.push([Math.cos(a) * RING_R, Math.sin(a) * RING_R, RING_S]); }
+  const sizes = [0.56, 0.56, 0.42, 0.42, 0.42, 0.32, 0.32, 0.32, 0.32, 0.24, 0.24, 0.24, 0.24, 0.24, 0.24, 0.24, 0.17, 0.17, 0.17, 0.17, 0.17, 0.17, 0.17, 0.17, 0.17, 0.17];
+  for (const s of sizes) {
+    let best = null;
+    for (let t = 0; t < 400; t++) {
+      const x = rnd() * (VW + 80) - 40 - cx, y = rnd() * (VH + 80) - 40 - cy, r1 = s * 246 * 0.78;
+      let ov = 0; for (const [a, b, q] of pts) ov += Math.max(0, (r1 + q * 246 * 0.78) - Math.hypot(x - a, y - b));
+      if (!best || ov < best[0]) best = [ov, x, y];
+    }
+    pts.push([best[1], best[2], s]);
+    SPL.tiles.push({ x: best[1], y: best[2], s, rot: (rnd() - 0.5) * 1.57, a: 0.35 + 0.5 * (s - 0.17) / 0.39, dir: rnd() < 0.5 ? -1 : 1 });
   }
+  SPL.tiles.push({ x: 560 - cx, y: 520 - cy, s: 1.5, rot: -0.38, a: 0.14, dir: 1, bg: 1 });   // 最远的两朵：很大、很淡
+  SPL.tiles.push({ x: 60 - cx, y: 880 - cy, s: 1.1, rot: 0.6, a: 0.14, dir: -1, bg: 1 });
+  SPL.tiles.sort((p, q) => (q.bg || 0) - (p.bg || 0) || p.s - q.s);                    // 远的先画，近的后画
+  for (const t of SPL.tiles) t.d = Math.min(1, Math.hypot(t.x, t.y) / 560);
 })();
-const LV_N = [1, 2, 6, 6];
+const LV_N = [1, 6, 6];
 function splitLevel(v, lv) {                      // 带回差，手抖不会来回跳
-  const up = [0.22, 0.52, 0.82], dn = [0.12, 0.42, 0.72];
-  while (lv < 3 && v > up[lv]) lv++;
+  const up = [0.3, 0.72], dn = [0.2, 0.6];
+  while (lv < 2 && v > up[lv]) lv++;
   while (lv > 0 && v < dn[lv - 1]) lv--;
   return lv;
 }
-function ancestor(k, lv) { return lv === 0 ? 0 : lv === 1 ? k & 1 : k; }
+function ancestor(k, lv) { return 0; }
 function slotTarget(k, lv) {
-  const dir = k & 1 ? 1 : -1;
   if (lv === 0) return { x: 0, y: 0, s: 1, flip: 0, rot: 0 };
-  if (lv === 1) return { x: k ? 145 : -145, y: 0, s: 0.58, flip: k ? 0 : 1, rot: dir * T * 0.55 };
-  const ang = (RING_ANG[k] * Math.PI / 180) + T * 0.35;
-  return { x: Math.cos(ang) * RING_R, y: Math.sin(ang) * RING_R, s: 0.31 + 0.09 * Math.sin(ang * 1 + T * 1.6), flip: k & 1, rot: dir * T * 0.7 };
+  const ang = (RING_ANG[k] * Math.PI / 180) + T * 0.12;          // 整圈慢慢转
+  return { x: Math.cos(ang) * RING_R, y: Math.sin(ang) * RING_R, s: RING_S, flip: 0, rot: T * 0.25 };   // 六朵一样大
 }
 function setLevel(lv) {
   const old = SPL.lv; if (lv === old) return;
-  const n = LV_N[lv], on = LV_N[old];
+  const n = LV_N[lv];
   for (let k = 0; k < 6; k++) {
     const c = SPL.slots[k];
-    if (k < n && !c.live) {                       // 新生的：从祖先身上长出来
-      const q = SPL.slots[ancestor(k, Math.min(old, lv))];
-      c.x = q.x; c.y = q.y; c.s = q.s; c.flip = q.flip; c.rot = q.rot; c.a = 1;
-    }
+    if (k < n && !c.live) { const q = SPL.slots[0]; c.x = q.x; c.y = q.y; c.s = q.s; c.flip = q.flip; c.rot = q.rot; c.a = 1; }   // 从中间那朵长出来
     c.live = k < n; c.ta = k < n ? 1 : 0;
   }
-  SPL.lv = lv; SPL.n = n; SPL.Zt = lv === 3 ? 0.4 : 1;
+  SPL.lv = lv; SPL.n = n;
   if (lv > old) sSplit(lv); else sMerge(lv);
-  FX_.shake = Math.max(FX_.shake, lv > old ? 2 + lv : 2);
 }
 function updateSplit(dt) {
   setLevel(splitLevel(G.lahT, SPL.lv));
   const lv = SPL.lv;
   for (let k = 0; k < 6; k++) {
     const c = SPL.slots[k];
-    const t = c.live ? slotTarget(k, lv) : slotTarget(ancestor(k, lv), lv);
-    c.x = damp(c.x, t.x, 15, dt); c.y = damp(c.y, t.y, 15, dt); c.s = damp(c.s, t.s, 15, dt);
+    const t = c.live ? slotTarget(k, lv) : slotTarget(0, lv);
+    c.x = damp(c.x, t.x, 9, dt); c.y = damp(c.y, t.y, 9, dt); c.s = damp(c.s, t.s, 9, dt);
     c.flip = damp(c.flip, t.flip, 9, dt); c.rot = damp(c.rot, t.rot, 8, dt);
     c.a = c.ta > 0.5 ? 1 : damp(c.a, 0, 10, dt);
   }
-  SPL.Z = damp(SPL.Z, SPL.Zt, lv === 3 ? 7 : 9, dt);   // 镜头：拉远稍慢一点，有分量；推近更快
+  SPL.W = damp(SPL.W, lv === 2 ? 1 : 0, 3.2, dt);          // 满屏：慢慢铺开，有分量
+  G.cup = damp(G.cup, G.cupT, 6, dt);
 }
 const ARC = [[0, 120, 0.8], [60, -80, 0.46], [20, -200, 0.27], [-25, -260, 0.16], [-38, -294, 0.095], [-34, -314, 0.055]];   // 往深处飘的路线（离花心的位置、大小）
 function isSingle() {
   const c = SPL.slots[0];
-  if (G.thru > 0.01 || G.back > 0.01 || G.dep > 0.005) return false;
+  if (G.thru > 0.01 || G.back > 0.01 || G.dep > 0.005 || G.cup > 0.01 || SPL.W > 0.003) return false;
   if (SPL.lv !== 0 || SPL.Z < 0.999 || Math.abs(c.x) > 0.5 || Math.abs(c.y) > 0.5 || c.s < 0.999 || c.flip > 0.01) return false;
   for (let k = 1; k < 6; k++) if (SPL.slots[k].a > 0.01) return false;
   return true;
@@ -316,8 +323,12 @@ function copies() {                               // 此刻要画的所有团花
     const d = Math.hypot(sx - LAY.cx, sy - LAY.cy) / 520, f = sstep(d * 0.7, d * 0.7 + 0.45, G.back);   // 离中间越远翻得越晚：多米诺
     out.push({ x: sx, y: sy, s: s * Z, a, fx: Math.cos(flip * Math.PI) * Math.cos(f * Math.PI), rot: rot + G.lahAng, sil: f > 0.5 });
   };
-  const wa = sstep(0.97, 0.6, Z);
-  if (wa > 0.01) for (const t of SPL.tiles) put(t.x, t.y, t.s * (1 + 0.12 * Math.sin(T * 1.4 + t.ph)), wa, 0, t.dir * T * 0.45);
+  const W = SPL.W;
+  if (W > 0.003) for (const t of SPL.tiles) {                     // 满屏：从中心长出去，越远越晚到
+    const p = sstep(t.d * 0.45, t.d * 0.45 + 0.55, W);
+    if (p < 0.005) continue;
+    put(t.x * p, t.y * p, t.s * p, t.a * p, 0, t.rot + t.dir * T * 0.08);
+  }
   for (const o of out) if (o.y < 230 || o.y > 720) o.a *= 0.45;   // 标题和底部文字那里暗一点，字要看得清
   const th = G.thru;
   if (G.dep > 0.005) {                                           // 一镜到底：团花往深处飘，身后一朵接一朵跟着
@@ -336,6 +347,9 @@ function copies() {                               // 此刻要画的所有团花
     if (k === 0 && th > 0.01) {                                   // 镜头冲进花心的镂空，穿过去是下一张纸
       put(c.x, c.y, c.s * (1 + 3.4 * th * th), c.a * (1 - sstep(0.45, 0.95, th)), c.flip, c.rot);
       put(c.x, c.y, 0.08 + 0.92 * sstep(0.15, 1, th), sstep(0.1, 0.45, th), c.flip, c.rot - (1 - th) * 1.0);
+    } else if (k === 0 && G.cup > 0.01) {                          // 双手捧住：亮一下、浮起来一点
+      put(c.x, c.y - 26 * G.cup, c.s * (1 + 0.05 * G.cup), c.a, c.flip, c.rot);
+      put(c.x, c.y - 26 * G.cup, c.s * (1 + 0.05 * G.cup), c.a * 0.7 * G.cup, c.flip, c.rot);
     } else put(c.x, c.y, c.s, c.a, c.flip, c.rot); }
   return out;
 }
@@ -842,18 +856,22 @@ function mono(g, sz, bold) { g.textFont('Consolas'); g.textStyle(bold ? BOLD : N
 function cn(g, sz, bold)   { g.textFont('Microsoft YaHei'); g.textStyle(bold ? BOLD : NORMAL); g.textSize(sz); }
 
 const HINTS_CAM = [
-  '连招：握拳 → 张开 → 手往后拉 → 往前推 → 握拳',
-  '张开手 → 扇形扫开再翻开    握拳 → 折回一角',
-  '手往后拉 → 团花飘向远处    往前推 → 飘回来、穿进花心',
+  '单手：握拳 → 折起    张开 → 展开    往后拉 → 飘远    往前推 → 飘回来',
+  '双手捧在一起 → 团花亮起来    往两边拉开 → 一变六',
+  '双手拉到最开 → 铺满全屏    合拢 → 收回一朵',
   '拧手腕 → 团花转    手往左右上下移 → 团花倾斜'
 ];
 const HINTS_TOUCH = [
-  '手指往上拖 → 团花飘向远处    往下拖 → 穿进花心',
+  '一根手指往上拖 → 飘向远处    松开 → 飘回来',
+  '两根手指往两边拉开 → 一变六 → 铺满全屏    合拢 → 收回一朵',
   '点一下 → 折起 / 展开    左右拖 → 团花转'
 ];
 function statusText() {
   if (G.demo) return '● 演示 DEMO';
   if (G.thru > 0.3) return '● 穿过花心 THROUGH';
+  if (SPL.W > 0.3) return '● 满屏 FULL SCREEN';
+  if (SPL.lv === 1) return '● 一变六 SIX';
+  if (G.cup > 0.3) return '● 捧住 HOLD';
   if (G.dep > 0.3) return '● 飘向远处 DEPTH';
   if (Math.abs(rot) > 0.35) return '● 旋转 SPIN';
   if (Math.abs(L3.yaw) + Math.abs(L3.pitch) > 0.25) return '● 倾斜 TILT';
@@ -949,16 +967,6 @@ function drawCamBox(ctx, x0, y0, w, h) {
   ctx.globalAlpha = 120 / 255;
   ctx.translate(x0 + w, y0); ctx.scale(-1, 1);
   ctx.drawImage(v, sx, sy, srcW, srcH, 0, 0, w, h);
-  ctx.restore();
-  ctx.save();
-  ctx.strokeStyle = 'rgb(182,255,60)'; ctx.lineWidth = 1;
-  for (const hd of CAM.hands) {
-    const P = hd.lm.map(p => ({ x: x0 + (((1 - p.x) * vw) - sx) / srcW * w, y: y0 + (p.y * vh - sy) / srcH * h }));
-    ctx.beginPath();
-    for (const f of [[0,1,2,3,4],[0,5,6,7,8],[0,9,10,11,12],[0,13,14,15,16],[0,17,18,19,20]])
-      for (let i = 0; i < f.length - 1; i++) { ctx.moveTo(P[f[i]].x, P[f[i]].y); ctx.lineTo(P[f[i + 1]].x, P[f[i + 1]].y); }
-    ctx.stroke();
-  }
   ctx.restore();
 }
 
@@ -1115,12 +1123,24 @@ function gestures(dt) {
   const hs = CAM.hands;
   if (!hs.length) {
     CAM.prim = null;
-    G.lahT = 0; G.thruT = 0; G.backT = 0; G.depT = 0;
+    G.lahT = 0; G.thruT = 0; G.backT = 0; G.depT = 0; G.cupT = 0;
     if (!PTR.active) { bloomT = 0.05; rotT = 0; L3.spreadT = 0; L3.yawT = 0; L3.pitchT = 0; }   // 原版：没看到手 = 折起来
     return;
   }
   const prim = hs.length === 2 ? (hs[0].size >= hs[1].size ? hs[0] : hs[1]) : hs[0];
   CAM.prim = prim;
+  if (hs.length === 2) {                                       // 双手：捧在一起 → 亮起来；往两边拉开 → 一变六 → 满屏
+    const a = hs[0], b = hs[1], sz = (a.szS + b.szS) / 2;
+    const dn = Math.hypot(a.rx - b.rx, a.ry - b.ry) / sz;     // 两手掌心的距离（按手掌大小算，离镜头远近都一样）
+    a.dnS = a.dnS === undefined ? dn : a.dnS + (dn - a.dnS) * 0.35;
+    const d = a.dnS;
+    bloomT = 1; rotT = 0; L3.yawT = 0; L3.pitchT = 0; L3.spreadT = 0;
+    G.depT = 0; G.thruT = 0; G.backT = 0;
+    G.lahT = Math.min(1, Math.max(0, (d - 2.8) / 5.2));
+    G.cupT = d < 3.0 ? 1 : 0;
+    return;
+  }
+  G.cupT = 0;
   bloomT = prim.open;                                          // 原版：张开 = 展开，握拳 = 折起
   { const r = prim.roll, dz = 0.12; rotT = (Math.abs(r) < dz ? 0 : r - Math.sign(r) * dz) * 2.6; }  // 手腕稍微歪一点不算，免得花自己乱转                                      // 拧手腕 → 团花跟着转（手腕转 ±75° ≈ 团花转一整圈）
   L3.yawT = (prim.sx / VW - 0.5) * 3.2;                        // 手往左，花朝左倾，幅度大到能看见侧面
@@ -1129,33 +1149,51 @@ function gestures(dt) {
   const r = prim.szS / prim.base;                              // <1 手往后拉，>1 手往前推
   G.lahT = 0;
   G.depT = Math.min(1, Math.max(0, (0.97 - r) / 0.42));        // 手往后拉：团花往深处飘，一朵接一朵
-  G.thruT = sstep(1.18, 1.55, r);                              // 推近：穿进花心
+  G.thruT = 0;                                                 // 往前推只有一个意思：飘回来（穿花心只在演示里）
   G.backT = 0;
 }
 
 // =============================================================
 //  没有摄像头：手指 / 鼠标
 // =============================================================
-const PTR = { active: false, down: false, x: VW / 2, y: VH / 2, sx: 0, sy: 0, t0: 0, mv: 0 };
+const PTR = { active: false, down: false, x: VW / 2, y: VH / 2, sx: 0, sy: 0, t0: 0, mv: 0, pts: new Map(), d0: 0, two: false };
 function initPointer(el) {
   const pos = e => { const r = el.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * VW, y: (e.clientY - r.top) / r.height * VH }; };
-  el.addEventListener('pointerdown', e => { audioOn(); el.setPointerCapture(e.pointerId); const p = pos(e); PTR.x = p.x; PTR.y = p.y; PTR.sx = p.x; PTR.sy = p.y; PTR.t0 = T; PTR.mv = 0; PTR.down = true; PTR.active = true; G.ptrRecent = T; e.preventDefault(); });
-  el.addEventListener('pointermove', e => { const p = pos(e); PTR.x = p.x; PTR.y = p.y; if (PTR.down) PTR.mv = Math.max(PTR.mv, Math.hypot(p.x - PTR.sx, p.y - PTR.sy)); G.ptrRecent = T; });
-  const up = () => { if (PTR.down && T - PTR.t0 < 0.3 && PTR.mv < 14) G.ptrFold = !G.ptrFold; PTR.down = false; G.ptrRecent = T; };   // 点一下 = 折起 / 展开
+  const dist = () => { const q = [...PTR.pts.values()]; return Math.hypot(q[0].x - q[1].x, q[0].y - q[1].y); };
+  el.addEventListener('pointerdown', e => { audioOn(); el.setPointerCapture(e.pointerId); const p = pos(e); PTR.pts.set(e.pointerId, p);
+    if (PTR.pts.size === 2) { PTR.two = true; PTR.d0 = dist(); }
+    if (PTR.pts.size === 1) { PTR.x = p.x; PTR.y = p.y; PTR.sx = p.x; PTR.sy = p.y; PTR.t0 = T; PTR.mv = 0; PTR.two = false; }
+    PTR.down = true; PTR.active = true; G.ptrRecent = T; e.preventDefault(); });
+  el.addEventListener('pointermove', e => { const p = pos(e); if (PTR.pts.has(e.pointerId)) PTR.pts.set(e.pointerId, p);
+    if (PTR.pts.size < 2) { PTR.x = p.x; PTR.y = p.y; if (PTR.down) PTR.mv = Math.max(PTR.mv, Math.hypot(p.x - PTR.sx, p.y - PTR.sy)); }
+    G.ptrRecent = T; });
+  const up = e => { PTR.pts.delete(e.pointerId);
+    if (PTR.pts.size === 0) { if (PTR.down && !PTR.two && T - PTR.t0 < 0.3 && PTR.mv < 14) G.ptrFold = !G.ptrFold; PTR.down = false; PTR.two = false; }   // 点一下 = 折起 / 展开
+    G.ptrRecent = T; };
   el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
   el.addEventListener('contextmenu', e => e.preventDefault());
+  PTR.dist = dist;
 }
-function pointerUpdate(dt) {                                    // 没有摄像头时：鼠标/手指位置 = 倾斜，按住 = 拆层
+function pointerUpdate(dt) {                                    // 没有摄像头时：手指 / 鼠标
   if (CAM.hands.length) return;
   const recent = T - G.ptrRecent < 4;
   PTR.active = PTR.down || recent;
-  if (!PTR.active) { if (!CAM.on) { bloomT = 1; L3.spreadT = 0; L3.yawT = 0; L3.pitchT = 0; G.depT = 0; G.thruT = 0; rotT = 0; } return; }
+  if (!PTR.active) { if (!CAM.on) { bloomT = 1; L3.spreadT = 0; L3.yawT = 0; L3.pitchT = 0; G.depT = 0; G.thruT = 0; G.lahT = 0; G.cupT = 0; rotT = 0; } return; }
+  L3.yawT = 0; L3.pitchT = 0; L3.spreadT = 0; G.thruT = 0;
+  if (PTR.two && PTR.pts.size === 2) {                          // 两根手指：合在一起 = 捧住，往两边拉开 = 一变六 → 满屏
+    const dd = PTR.dist() - PTR.d0;
+    bloomT = 1; G.depT = 0; rotT = 0;
+    G.lahT = Math.min(1, Math.max(0, (dd - 20) / 240));
+    G.cupT = dd < 20 ? 1 : 0;
+    return;
+  }
   bloomT = G.ptrFold ? 0.05 : 1;
-  L3.yawT = 0; L3.pitchT = 0; L3.spreadT = 0;
-  if (PTR.down) {                                               // 手指往上拖 = 飘向远处，往下拖 = 穿进花心，左右拖 = 转
+  if (PTR.two) { G.lahT = 0; G.cupT = 0; return; }              // 刚松开一根手指：先收回来
+  G.lahT = 0; G.cupT = 0;
+  if (PTR.down) {                                               // 一根手指往上拖 = 飘向远处，松开 = 飘回来，左右拖 = 转
     const dx = PTR.x - PTR.sx, dy = PTR.y - PTR.sy;
-    G.depT = Math.min(1, Math.max(0, -dy / 230)); G.thruT = sstep(40, 210, dy); rotT = dx / 110;
-  } else { G.depT = 0; G.thruT = 0; rotT = 0; }
+    G.depT = Math.min(1, Math.max(0, -dy / 230)); rotT = dx / 110;
+  } else { G.depT = 0; rotT = 0; }
 }
 
 // =============================================================
@@ -1200,15 +1238,14 @@ function sSnap(p) {
   sNoise(0.06, 'highpass', 3000, 6000, 0.7, 0.35);
 }
 function sSplit(lv) {                             // 一分为多：低音"咚" + 纸"嚓"；拉远那一下加一道呼的风声
-  sTone([0, 150, 200, 110][lv], [0, 72, 95, 40][lv], lv === 3 ? 0.4 : 0.16, 0.5);
+  sTone([0, 200, 110][lv], [0, 95, 40][lv], lv === 2 ? 0.4 : 0.16, 0.5);
   sNoise(0.05, 'highpass', 3000, 5600, 0.8, 0.4);
-  if (lv === 1) sNoise(0.18, 'bandpass', 700, 2400, 0.9, 0.3, 0.004, 0.01);       // 对折撕开
-  if (lv === 2) sNoise(0.3, 'bandpass', 1800, 600, 1.0, 0.3, 0.01);                // 甩出一圈
-  if (lv === 3) sNoise(0.55, 'bandpass', 2600, 300, 0.9, 0.42, 0.02);              // 镜头往后拉
+  if (lv === 1) sNoise(0.3, 'bandpass', 1800, 600, 1.0, 0.3, 0.01);                // 展成一圈
+  if (lv === 2) sNoise(0.55, 'bandpass', 2600, 300, 0.9, 0.42, 0.02);              // 铺满全屏
 }
 function sMerge(lv) {                             // 合拢：往上收；冲回一个时风声反过来
   sTone(90, 170, 0.12, 0.35);
-  sNoise(lv === 2 ? 0.45 : 0.1, 'bandpass', lv === 2 ? 300 : 2600, lv === 2 ? 2600 : 900, 0.9, 0.3);
+  sNoise(lv === 1 ? 0.45 : 0.1, 'bandpass', lv === 1 ? 300 : 2600, lv === 1 ? 2600 : 900, 0.9, 0.3);
 }
 function sLayer(k, out) {                          // 一层分开 / 合上：纸"嗒"一声，越外层越低
   sNoise(0.05, 'bandpass', out ? 2600 - k * 300 : 1800 - k * 200, out ? 3800 - k * 350 : 1200 - k * 150, 1.2, 0.22, 0.002, 0);
