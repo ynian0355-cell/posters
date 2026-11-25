@@ -376,6 +376,7 @@ cv.addEventListener('pointermove', e => {
 });
 const up = () => {
   if (!ptr) return;
+  if (!autoSoundDone){ autoSoundDone = true; setSound(true, false); }
   if (ptr.moved < 12*S){
     let best = null, bd = 1e9;
     for (const j of jellies){ const d = Math.hypot(j.x-ptr.x, j.y-ptr.y); if (d < bd){ bd = d; best = j; } }
@@ -407,12 +408,17 @@ function unlockIOS(on){
     if (on) keepAlive.play().catch(()=>{}); else keepAlive.pause();
   }catch(_){}
 }
-document.getElementById('bSound').onclick = e => {
+// 声音开关：点按钮切换；观众第一次划或点布面时自动打开（只自动一次，之后听按钮的）
+let autoSoundDone = false;
+function setSound(on, chime){
   initAudio(); if (ac) ac.resume().catch(()=>{});
-  unlockIOS(!soundOn && !!ac);
-  soundOn = !soundOn && !!ac; e.currentTarget.classList.toggle('on', soundOn);
-  if (soundOn){ startTrack(); tone(2); } else { playToken++; stopTrack(1.2); }
-};
+  on = on && !!ac;
+  if (on === soundOn) return;
+  unlockIOS(on);
+  soundOn = on; document.getElementById('bSound').classList.toggle('on', soundOn);
+  if (soundOn){ startTrack(); if (chime) tone(2); } else { playToken++; stopTrack(1.2); }
+}
+document.getElementById('bSound').onclick = () => { autoSoundDone = true; setSound(!soundOn, true); };
 
 
 // ---------- physics ----------
