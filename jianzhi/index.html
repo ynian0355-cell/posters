@@ -1,0 +1,1258 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>数字剪纸 · 掌中展开 · A0</title>
+<!-- p5.js：Processing 官方网页版；手势识别：MediaPipe Hand Landmarker（双手、GPU） -->
+<script src="lib/p5.min.js"></script>
+<script>window.p5||document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.11.1/p5.min.js"><\/script>')</script>
+<style>
+  html,body{margin:0;height:100%;background:#0d0d10;overflow:hidden;
+    display:flex;align-items:center;justify-content:center;touch-action:none;
+    -webkit-user-select:none;user-select:none}
+  canvas{touch-action:none}
+  #msg{position:fixed;left:50%;top:16px;transform:translateX(-50%);
+    font:13px "Microsoft YaHei",sans-serif;color:#b6ff3c;background:#000a;padding:6px 14px;display:none;
+    max-width:86vw;text-align:center;line-height:1.5;z-index:5}
+  #vid{position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;left:0;top:0}
+</style>
+</head>
+<body>
+<div id="msg"></div>
+<video id="vid" playsinline muted></video>
+<script>
+// =============================================================
+//  { 数字剪纸 } 非遗新生计划 · 掌中展开      —— A0 交互海报 · 手势版
+//
+//  概念：剪纸最神奇的一刻是"展开"。纸折叠着剪，打开才看见对称的花样。
+//        握拳 = 折起来的纸；张开手掌 = 一折一折展开成团花。
+//
+//  原版手势（不变）：握拳 → 折叠    张开手掌 → 展开团花    手左右移动 → 旋转
+//  新增手势：
+//    握拳停住 → 猛地张开        十六折一口气甩开，到位就停
+//    双手张开往两边拉            一变二 → 四 → 八，合拢变回一个；两手的斜度就是整组的斜度
+//    横着挥手 / 反着挥手          团花被吹成纸屑 / 吹回来拼好
+//    捏住拇指和食指划过去        剪：点顺着刀口往下掉；松手，刀线围住的那块整片落下
+//    握拳折起来                  换一张新纸（剪掉、吹走的都回来）
+//  没有摄像头（手机 / iPad / 鼠标）：
+//    单指划 = 剪    长按再松开 / 双击 = 甩开    双指往两边拉 = 一变多    双指快扫 = 吹散
+//  键盘：S 截图   P 导出 A0 印刷图（150dpi）   M 静音   空格 按住蓄力松开甩开   W 吹散/吹回
+// =============================================================
+
+const VW = 600, VH = 848;                         // A0 比例 1:1.414
+const A0_DPI = 150;
+const A0_K = (841 / 25.4 * A0_DPI) / VW;
+
+const SECT = 16;                                  // 纸折 8 次 → 16 等分对称
+const WEDGE = Math.PI * 2 / SECT;
+const BUILD = 'folder';                        // folder：带 lib 文件夹；artifact：Claude 里预览用
+
+let K = 1;
+let paper = [], lights = [];
+let bloom = 0.05, bloomT = 0.05, rot = 0, rotT = 0, T = 0;
+let camOK = false, hasHand = false;
+
+// 颜色（原版）
+const RED   = 'hsla(356,92%,56%,0.62)';
+const RED2  = 'hsla(8,95%,62%,0.55)';
+const LIME  = [182, 255, 60];
+
+function fitK() { K = Math.min(windowWidth / VW, windowHeight / VH) * 0.96; }
+
+function setup() {
+  fitK();
+  const c = createCanvas(VW * K, VH * K);
+  pixelDensity(Math.min(2, displayDensity()));
+  buildPaperCut();
+  initDots();
+  initDust();
+  initPointer(c.elt);
+  startCamera();
+  say('点一下画面打开声音 · M 静音', 3500);
+}
+function windowResized() { fitK(); resizeCanvas(VW * K, VH * K); }
+
+// =============================================================
+//  剪纸纹样（原版，一笔没改）：只设计 1/16 的扇形，其余靠"折纸"镜像出来
+// =============================================================
+function isPaper(r, phi) {
+  const t = phi / WEDGE;
+  if (r < 0.09) return true;                                  // 花心
+  if (r < 0.12) return false;                                 // 一圈镂空
+  if (r < 0.15) return true;                                  // 细圈
+
+  if (r < 0.50) {                                             // 内层花瓣（以扇形一边为中线）
+    const s = (r - 0.15) / 0.35;
+    const hw = WEDGE * 0.95 * Math.sin(Math.PI * Math.pow(s, 0.8));
+    if (phi < hw) {
+      if (phi < WEDGE * 0.07) return true;                    // 叶脉
+      if (phi < hw * 0.55 && s > 0.2 && s < 0.8) return false;// 花瓣内镂空
+      return true;
+    }
+    const dx = (r - 0.36), dy = (phi - WEDGE * 0.85) * r;     // 花瓣之间的小圆点
+    return dx * dx + dy * dy < 0.0011;
+  }
+
+  if (r < 0.53) return true;                                  // 第二圈
+  if (r < 0.61) return ((t * 3) % 1) < (r - 0.53) / 0.08;     // 锯齿纹
+
+  if (r < 0.90) {                                             // 外层花瓣（交错）
+    const s = (r - 0.61) / 0.29;
+    const d = WEDGE - phi;
+    const hw = WEDGE * 0.98 * Math.sin(Math.PI * Math.pow(s, 0.9));
+    if (d < hw) {
+      if (d < WEDGE * 0.06) return true;                      // 中线
+      if (d > hw * 0.72) return true;                         // 轮廓
+      const m = (s - 0.55) * 3.2, n = (d / hw - 0.3) * 2.2;   // 月牙纹
+      return (m * m + n * n < 0.25) && !(m * m + (n + 0.35) * (n + 0.35) < 0.2);
+    }
+    return Math.abs(s - 0.5) * 1.2 + (phi / WEDGE) * 2.2 < 0.55;  // 花瓣之间的菱形
+  }
+
+  if (r < 0.93) return true;                                  // 外框
+  return r < 0.93 + 0.07 * Math.abs(Math.cos(t * Math.PI));   // 波浪花边
+}
+
+function buildPaperCut() {
+  let tries = 0;
+  while (paper.length < 620 && tries < 200000) {
+    tries++;
+    const r = Math.sqrt(Math.random()), phi = Math.random() * WEDGE;
+    if (isPaper(r, phi)) paper.push({ r, phi, L: layerOf(r), sz: 1.3 + Math.random() * 0.8, c: Math.random() < 0.8 ? 0 : 1 });
+    else if (r < 0.92 && lights.length < 70 && Math.random() < 0.06)
+      lights.push({ r, phi, L: layerOf(r), seed: Math.random() * 10, lime: Math.random() < 0.6 });
+  }
+}
+
+// =============================================================
+//  每一个点都有自己的状态：在纸上 / 被剪下正在掉 / 掉没了
+//  点在纸上时，有一根"弹簧"把它拉回原位 —— 甩开、吹散都是推它离开原位
+// =============================================================
+let NP, NL, NPAP, N;
+let OX, OY, VX, VY, ST, FX, FY, FVX, FVY, FADE, LOOSE, SK, GUST, KEEP, HC, HS, PX, PY;
+const K_TIGHT = 70, K_SOFT = 14;
+function initDots() {
+  NP = paper.length; NL = lights.length; NPAP = SECT * NP; N = NPAP + SECT * NL;
+  const F = () => new Float32Array(N);
+  OX = F(); OY = F(); VX = F(); VY = F(); FX = F(); FY = F(); FVX = F(); FVY = F();
+  FADE = F().fill(1); LOOSE = F(); SK = F().fill(K_TIGHT); KEEP = F(); HC = F(); HS = F(); PX = F(); PY = F();
+  ST = new Uint8Array(N); GUST = new Uint16Array(N);
+  for (let i = 0; i < N; i++) KEEP[i] = Math.random();
+}
+function dotR(i) { return i < NPAP ? paper[i % NP].r : lights[(i - NPAP) % NL].r; }
+
+// =============================================================
+//  状态
+// =============================================================
+const FX_ = { flash: 0, shake: 0, cutFlash: 0, cutLine: null, windLines: [], snapT: 9 };
+const G = {
+  charging: false, charge: 0, fistT: 0, openRiseT: -1,
+  snapping: 0, bloomV: 0,
+  lah: 0, lahT: 0, lahAng: 0, lahAngT: 0, lahN: 0, thru: 0, thruT: 0, back: 0, backT: 0, dep: 0, depT: 0, idle: 0, demo: false, demoLabel: '', demoDone: false, ptrFold: false,
+  windDir: 0, windFront: null, windCool: 0, gust: 0, windBack: false, looseN: 0,
+  cutting: false, blade: null, bladeShow: null, cutPath: [], snipT: 0, lastCut: -99, detached: 0,
+  foldT: 0, ptrRecent: -99, status: '', hintKey: ''
+};
+
+// =============================================================
+//  主循环
+// =============================================================
+function draw() {
+  const dt = Math.min(0.05, Math.max(0.001, deltaTime / 1000));
+  step(dt);
+  renderPoster(p5.instance, K, true);
+}
+function step(dt) {
+  T += dt;
+  G.windCool -= dt; G.snipT -= dt;
+  camUpdate(dt);
+  pointerUpdate(dt);
+  demoUpdate(dt);
+  updateBloom(dt);
+  layout();
+  physics(dt);
+  effects(dt);
+  updateDust(dt);
+  G.status = statusText();
+}
+
+// 没人的时候：自己按分镜演一遍，告诉观众每一步是什么手势
+const DEMO = [[0, 2, '握拳'], [2, 4.2, '张开手'], [4.2, 7.6, '手往后拉'], [7.6, 9.2, '拉到底'], [9.2, 11.2, '手往前推'], [11.2, 13.2, '再往前推 · 穿进花心'], [13.2, 15.2, '握拳']];
+function demoUpdate(dt) {
+  if (CAM.hands.length || PTR.active) { G.idle = 0; if (G.demo) { G.demo = false; G.thruT = 0; G.depT = 0; } return; }
+  G.idle += dt;
+  if (G.idle < 8) return;
+  G.demo = true;
+  const t = (G.idle - 8) % 15.2;
+  let i = 0; while (i < DEMO.length - 1 && t >= DEMO[i][1]) i++;
+  G.demoLabel = DEMO[i][2];
+  rotT = 0; L3.yawT = 0; L3.pitchT = 0;
+  bloomT = (i === 0 || i === 6) ? 0.05 : 1;
+  G.depT = (i === 2 || i === 3) ? 1 : 0;
+  if (i === 5) { if (!G.demoDone) G.thruT = 1; if (G.thru > 0.985) { G.thru = 0; G.thruT = 0; G.demoDone = true; } }
+  else { G.thruT = 0; G.demoDone = false; }
+}
+function damp(a, b, rate, dt) { return a + (b - a) * (1 - Math.exp(-rate * dt)); }
+function sstep(a, b, x) { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); }
+
+// =============================================================
+//  单手：倾斜（第 1 关）+ 拆层（第 3 关）
+//  团花原本就是 5 圈：花心 / 内花瓣 / 锯齿环 / 外花瓣 / 花边，拆开只是把这 5 圈在空间里分开，点一个不改
+// =============================================================
+const L3 = { yaw: 0, yawT: 0, pitch: 0, pitchT: 0, spread: 0, spreadT: 0, sp: [0, 0, 0, 0, 0], on: [0, 0, 0, 0, 0] };
+const LAYER_GAP = 50, FOCAL = 760;
+function layerOf(r) { return r < 0.15 ? 0 : r < 0.50 ? 1 : r < 0.61 ? 2 : r < 0.90 ? 3 : 4; }
+function updateLayers(dt) {
+  L3.yaw = damp(L3.yaw, L3.yawT, 14, dt);              // 跟手快，到位就停，不回弹
+  L3.pitch = damp(L3.pitch, L3.pitchT, 14, dt);
+  L3.spread = damp(L3.spread, L3.spreadT, 8, dt);
+  for (let k = 0; k < 5; k++) {                                // 从花心开始一层层分开，合的时候外层先回
+    const v = sstep(k * 0.11, k * 0.11 + 0.52, L3.spread);
+    L3.sp[k] = v;
+    if (!L3.on[k] && v > 0.55) { L3.on[k] = 1; sLayer(k, true); }
+    else if (L3.on[k] && v < 0.3) { L3.on[k] = 0; sLayer(k, false); }
+  }
+}
+function updateBloom(dt) {
+  updateLayers(dt);
+  if (G.snapping > 0) {                         // 甩开：猛地展开，到位就停，不回弹
+    G.snapping -= dt;
+    bloom = damp(bloom, 1, 13, dt);
+  } else {
+    bloom = damp(bloom, bloomT, 15, dt);         // 原版是 lerp 0.05，现在更跟手
+  }
+  bloom = Math.max(0, bloom);
+  rot = damp(rot, rotT, 14, dt);
+  G.lah = damp(G.lah, G.lahT, 7, dt);
+  G.dep = damp(G.dep, G.depT, 4.5, dt);                                // 往后拉：飘向远处（慢一点，像飘）
+  G.thru = damp(G.thru, G.dep < 0.08 ? G.thruT : 0, 7, dt);           // 往前推：穿进花心
+  { const end = G.backT ? 1.7 : 0; G.back += Math.sign(end - G.back) * Math.min(Math.abs(end - G.back), dt * 2.6); }  // 翻手背：从中间一圈圈翻过去
+  updateSplit(dt);
+  G.lahAng = damp(G.lahAng, G.lahAngT, 6, dt);
+  // 折起来 = 换一张新纸
+  if (bloom < 0.12 && G.snapping <= 0) { G.foldT += dt; if (G.foldT > 0.25) healAll(); } else G.foldT = 0;
+  if (G.detached > 0 && T - G.lastCut > 12) healAll();
+}
+
+// =============================================================
+//  一变多：两手拉开的距离 = 第几级
+//    0  一个团花
+//    1  对折：像纸对折再撕开，翻过去裂成两个，一个顺转一个逆转
+//    2  发射：两个甩出去绕成一圈六个，大小一圈圈渐变，整圈在转
+//    3  窗花墙：镜头猛地往后拉，原来这一圈只是一整面窗花墙的一小块
+//  两手合拢 = 倒着放：镜头推进，冲到眼前，只剩一个
+//  每一下都是快出、到位就停，不回弹
+// =============================================================
+const SPL = { lv: 0, n: 1, Z: 1, Zt: 1, slots: [], tiles: [] };
+const RING_R = 190, RING_ANG = [180, 0, 120, 300, 240, 60];   // 偶数号是左边那个生的，奇数号是右边那个生的
+for (let k = 0; k < 6; k++) SPL.slots.push({ x: 0, y: 0, s: 1, a: k ? 0 : 1, flip: 0, rot: 0, ta: k ? 0 : 1, live: k === 0 });
+(function makeWall() {                            // 四方连续：错位排开，大小和转向交替，中间留给那一圈
+  const D = 430, H = D * 0.866;
+  for (let j = -5; j <= 5; j++) for (let i = -4; i <= 4; i++) {
+    const x = (i + (j & 1 ? 0.5 : 0)) * D, y = j * H;
+    const h1 = Math.sin(i * 12.9898 + j * 78.233) * 43758.5453, h2 = Math.sin(i * 39.346 + j * 11.135) * 24634.6345;
+    const rx = (h1 - Math.floor(h1)) - 0.5, ry = (h2 - Math.floor(h2)) - 0.5;      // 每朵错开一点，不排成一行行
+    const xx = x + rx * D * 0.55, yy = y + ry * H * 0.55;
+    if (Math.hypot(xx, yy) < 340) continue;
+    SPL.tiles.push({ x: xx, y: yy, s: 0.5 + 0.42 * ((rx + ry + 1) * 0.5), dir: (i + j) & 1 ? 1 : -1, ph: (i * 7 + j * 3) % 6 });
+  }
+})();
+const LV_N = [1, 2, 6, 6];
+function splitLevel(v, lv) {                      // 带回差，手抖不会来回跳
+  const up = [0.22, 0.52, 0.82], dn = [0.12, 0.42, 0.72];
+  while (lv < 3 && v > up[lv]) lv++;
+  while (lv > 0 && v < dn[lv - 1]) lv--;
+  return lv;
+}
+function ancestor(k, lv) { return lv === 0 ? 0 : lv === 1 ? k & 1 : k; }
+function slotTarget(k, lv) {
+  const dir = k & 1 ? 1 : -1;
+  if (lv === 0) return { x: 0, y: 0, s: 1, flip: 0, rot: 0 };
+  if (lv === 1) return { x: k ? 145 : -145, y: 0, s: 0.58, flip: k ? 0 : 1, rot: dir * T * 0.55 };
+  const ang = (RING_ANG[k] * Math.PI / 180) + T * 0.35;
+  return { x: Math.cos(ang) * RING_R, y: Math.sin(ang) * RING_R, s: 0.31 + 0.09 * Math.sin(ang * 1 + T * 1.6), flip: k & 1, rot: dir * T * 0.7 };
+}
+function setLevel(lv) {
+  const old = SPL.lv; if (lv === old) return;
+  const n = LV_N[lv], on = LV_N[old];
+  for (let k = 0; k < 6; k++) {
+    const c = SPL.slots[k];
+    if (k < n && !c.live) {                       // 新生的：从祖先身上长出来
+      const q = SPL.slots[ancestor(k, Math.min(old, lv))];
+      c.x = q.x; c.y = q.y; c.s = q.s; c.flip = q.flip; c.rot = q.rot; c.a = 1;
+    }
+    c.live = k < n; c.ta = k < n ? 1 : 0;
+  }
+  SPL.lv = lv; SPL.n = n; SPL.Zt = lv === 3 ? 0.4 : 1;
+  if (lv > old) sSplit(lv); else sMerge(lv);
+  FX_.shake = Math.max(FX_.shake, lv > old ? 2 + lv : 2);
+}
+function updateSplit(dt) {
+  setLevel(splitLevel(G.lahT, SPL.lv));
+  const lv = SPL.lv;
+  for (let k = 0; k < 6; k++) {
+    const c = SPL.slots[k];
+    const t = c.live ? slotTarget(k, lv) : slotTarget(ancestor(k, lv), lv);
+    c.x = damp(c.x, t.x, 15, dt); c.y = damp(c.y, t.y, 15, dt); c.s = damp(c.s, t.s, 15, dt);
+    c.flip = damp(c.flip, t.flip, 9, dt); c.rot = damp(c.rot, t.rot, 8, dt);
+    c.a = c.ta > 0.5 ? 1 : damp(c.a, 0, 10, dt);
+  }
+  SPL.Z = damp(SPL.Z, SPL.Zt, lv === 3 ? 7 : 9, dt);   // 镜头：拉远稍慢一点，有分量；推近更快
+}
+const ARC = [[0, 120, 0.8], [60, -80, 0.46], [20, -200, 0.27], [-25, -260, 0.16], [-38, -294, 0.095], [-34, -314, 0.055]];   // 往深处飘的路线（离花心的位置、大小）
+function isSingle() {
+  const c = SPL.slots[0];
+  if (G.thru > 0.01 || G.back > 0.01 || G.dep > 0.005) return false;
+  if (SPL.lv !== 0 || SPL.Z < 0.999 || Math.abs(c.x) > 0.5 || Math.abs(c.y) > 0.5 || c.s < 0.999 || c.flip > 0.01) return false;
+  for (let k = 1; k < 6; k++) if (SPL.slots[k].a > 0.01) return false;
+  return true;
+}
+function copies() {                               // 此刻要画的所有团花（屏幕坐标），镜头和两手斜度都算进去
+  const out = [], ca = Math.cos(G.lahAng), sa = Math.sin(G.lahAng), Z = SPL.Z;
+  const put = (x, y, s, a, flip, rot) => {
+    const sx = LAY.cx + (x * ca - y * sa) * Z, sy = LAY.cy + (x * sa + y * ca) * Z, r = s * Z * 260;
+    if (sx < -r || sx > VW + r || sy < -r || sy > VH + r) return;
+    const d = Math.hypot(sx - LAY.cx, sy - LAY.cy) / 520, f = sstep(d * 0.7, d * 0.7 + 0.45, G.back);   // 离中间越远翻得越晚：多米诺
+    out.push({ x: sx, y: sy, s: s * Z, a, fx: Math.cos(flip * Math.PI) * Math.cos(f * Math.PI), rot: rot + G.lahAng, sil: f > 0.5 });
+  };
+  const wa = sstep(0.97, 0.6, Z);
+  if (wa > 0.01) for (const t of SPL.tiles) put(t.x, t.y, t.s * (1 + 0.12 * Math.sin(T * 1.4 + t.ph)), wa, 0, t.dir * T * 0.45);
+  for (const o of out) if (o.y < 230 || o.y > 720) o.a *= 0.45;   // 标题和底部文字那里暗一点，字要看得清
+  const th = G.thru;
+  if (G.dep > 0.005) {                                           // 一镜到底：团花往深处飘，身后一朵接一朵跟着
+    const d = G.dep, u = sstep(0.62, 1, d), dd = Math.min(1, d / 0.62), c0 = SPL.slots[0];
+    const at = k => { const A = ARC[k], tn = [0, 0, 1.1 * Math.pow(0.55, k)];
+      return [A[0] + (tn[0] - A[0]) * u, A[1] + (tn[1] - A[1]) * u, A[2] + (tn[2] - A[2]) * u]; };
+    for (let k = ARC.length - 1; k >= 0; k--) {
+      const pk = sstep(k * 0.09, k * 0.09 + 0.4, dd), tg = at(k), pv = k ? at(k - 1) : [0, 0, 1];
+      if (k && pk < 0.01) continue;
+      const x = pv[0] + (tg[0] - pv[0]) * pk, y = pv[1] + (tg[1] - pv[1]) * pk + Math.sin(T * 0.8 + k) * 3 * k * pk, sc = pv[2] + (tg[2] - pv[2]) * pk;
+      put(x, y, sc, (k ? pk : 1) * (1 - 0.12 * k), 0, c0.rot + k * 0.31 * pk);
+    }
+    return out;
+  }
+  for (let k = 0; k < 6; k++) { const c = SPL.slots[k]; if (c.a <= 0.01) continue;
+    if (k === 0 && th > 0.01) {                                   // 镜头冲进花心的镂空，穿过去是下一张纸
+      put(c.x, c.y, c.s * (1 + 3.4 * th * th), c.a * (1 - sstep(0.45, 0.95, th)), c.flip, c.rot);
+      put(c.x, c.y, 0.08 + 0.92 * sstep(0.15, 1, th), sstep(0.1, 0.45, th), c.flip, c.rot - (1 - th) * 1.0);
+    } else put(c.x, c.y, c.s, c.a, c.flip, c.rot); }
+  return out;
+}
+
+// =============================================================
+//  布局：每个点此刻"应该在"的位置（原版的折叠 / 展开公式）
+// =============================================================
+const S = 232;
+const LAY = { cx: VW / 2, cy: VH * 0.52, sm: 1, e: 0 };
+function layout() {
+  const e = bloom <= 1 ? bloom * bloom * (3 - 2 * bloom) : bloom;
+  const e1 = Math.min(1, e);
+  const base = -Math.PI / 2 - WEDGE / 2 * (1 - e1) + rot + T * 0.06 * e1;
+  const breath = 1 + Math.sin(T * 1.3) * 0.012;
+  LAY.e = e;
+  LAY.sm = 1; LAY.cx = VW / 2; LAY.cy = VH * 0.52;
+  // 拆开时整朵自动往后放倒一些（像参考图右上），层才看得出是一叠
+  const sp = L3.spread, pitch = L3.pitch + 0.62 * sp, yaw = L3.yaw;
+  const cp = Math.cos(pitch), spn = Math.sin(pitch), cw = Math.cos(yaw), sw = Math.sin(yaw);
+  const LZ = [0, 1, 2, 3, 4].map(k => L3.sp[k] * LAYER_GAP * (4 - k));      // 花心最靠前，花边在最后
+  const put = (i, x, y, z) => {
+    const y1 = y * cp - z * spn, z1 = y * spn + z * cp;
+    const x2 = x * cw + z1 * sw, z2 = -x * sw + z1 * cw;
+    const k = FOCAL / (FOCAL - z2);
+    HC[i] = x2 * k; HS[i] = y1 * k + 25 * sp;                    // 整叠往下压一点，不碰标题
+  };
+  // 展开 = 两段连招，全程跟手：
+  //   前半（握拳 → 半张）：折好的一小角像折扇一样扫开，扫成半圆（Clock Wipe）
+  //   后半（半张 → 全张）：另外半圆原本叠在背面，沿直径整个翻过来，成整朵（Flip）
+  // 团花本来就以这条直径左右对称，所以背面那半就是正面半圆的镜像，纹样一点不改
+  const HALF = SECT / 2;
+  const fa = Math.min(1, e1 / 0.5);
+  const fbl = Math.max(0, Math.min(1, (e1 - 0.5) / 0.5)), fb = fbl * fbl * (3 - 2 * fbl);
+  const ax = base + HALF * WEDGE * fa;                           // 翻折的那条直径
+  const ux = Math.cos(ax), uy = Math.sin(ax), vx = -uy, vy = ux;
+  const psi = Math.PI * (1 - fb), cps = Math.cos(psi), sps = Math.sin(psi);
+  const place = (i, sct, phi, rr, z) => {
+    if (sct < HALF) {
+      const a = base + sct * WEDGE * fa + (sct % 2 ? WEDGE - phi : phi);
+      put(i, Math.cos(a) * rr, Math.sin(a) * rr, z);
+      return;
+    }
+    const tw = SECT - 1 - sct;                                   // 正面半圆里和它对称的那一格
+    const a = base + tw * WEDGE * fa + (tw % 2 ? WEDGE - phi : phi);
+    const x = Math.cos(a) * rr, y = Math.sin(a) * rr;
+    const al = x * ux + y * uy, bl = -(x * vx + y * vy);         // 先翻到直径另一边（展开后的位置）
+    const b2 = bl * cps;                                          // 再绕直径转 psi：psi=π 时正好叠回正面
+    put(i, al * ux + b2 * vx, al * uy + b2 * vy, z + Math.abs(bl) * sps);   // 翻起来时朝观众这边抬
+  };
+  for (let sct = 0; sct < SECT; sct++) {
+    for (let j = 0; j < NP; j++) {
+      const p = paper[j];
+      place(sct * NP + j, sct, p.phi, p.r * S * breath, LZ[p.L]);
+    }
+    for (let j = 0; j < NL; j++) {
+      const L2 = lights[j];
+      place(NPAP + sct * NL + j, sct, L2.phi, L2.r * S * breath, LZ[L2.L]);
+    }
+  }
+}
+
+// =============================================================
+//  物理
+// =============================================================
+function physics(dt) {
+  const cx = LAY.cx, cy = LAY.cy, sm = LAY.sm;
+  let loose = 0, det = 0;
+  for (let i = 0; i < N; i++) {
+    const st = ST[i];
+    if (st === 0) {
+      if (LOOSE[i] > 0) {                         // 被风吹着：不拉回，慢慢飘
+        LOOSE[i] -= dt; loose++;
+        const dr = Math.exp(-1.1 * dt);
+        VX[i] = VX[i] * dr + Math.sin(T * 2.3 + i * 0.37) * 30 * dt;
+        VY[i] = VY[i] * dr + (18 + Math.cos(T * 1.7 + i) * 26) * dt;
+        if (LOOSE[i] <= 0) SK[i] = K_SOFT;
+      } else {
+        const k = SK[i], c = 2 * Math.sqrt(k);          // 临界阻尼：到位就停，不回弹
+        VX[i] += (-k * OX[i] - c * VX[i]) * dt;
+        VY[i] += (-k * OY[i] - c * VY[i]) * dt;
+        if (k !== K_TIGHT && OX[i] * OX[i] + OY[i] * OY[i] < 1) SK[i] = K_TIGHT;
+      }
+      OX[i] += VX[i] * dt; OY[i] += VY[i] * dt;
+      if (FADE[i] < 1) FADE[i] = Math.min(1, FADE[i] + dt * 1.4);
+      PX[i] = cx + HC[i] * sm + OX[i]; PY[i] = cy + HS[i] * sm + OY[i];
+    } else if (st === 1) {                        // 被剪下：往下掉
+      det++;
+      FVY[i] += 980 * dt; FVX[i] *= Math.exp(-0.6 * dt);
+      FX[i] += FVX[i] * dt; FY[i] += FVY[i] * dt;
+      if (FY[i] > VH + 8) ST[i] = 2;
+    } else det++;
+  }
+  G.looseN = loose; G.detached = det;
+}
+function healAll() {
+  let any = false;
+  for (let i = 0; i < N; i++) {
+    if (ST[i] !== 0) { ST[i] = 0; OX[i] = OY[i] = VX[i] = VY[i] = 0; FADE[i] = 0; any = true; }
+    if (LOOSE[i] > 0) { LOOSE[i] = 0; SK[i] = K_SOFT; }
+  }
+  G.detached = 0;
+  return any;
+}
+
+// =============================================================
+//  五个手势的效果
+// =============================================================
+function startCharge() { if (!G.charging) { G.charging = true; G.charge = 0; } }
+function cancelCharge() { G.charging = false; G.charge = 0; }
+function snap(power) {                            // 握拳停住 → 猛地张开
+  power = Math.max(0.35, Math.min(1, power));
+  G.charging = false; G.charge = 0;
+  G.snapping = 1.1; G.bloomV = 7 + 5 * power; bloomT = 1;
+  if (bloom > 0.5) bloom = 0.05;                  // 已经开着：先"啪"地收拢再甩
+  for (const p of dust) { const dx = p.x - LAY.cx, dy = p.y - LAY.cy, d = Math.hypot(dx, dy) + 1; p.vx += dx / d * 260 * power; p.vy += dy / d * 260 * power; }
+  FX_.flash = 1; FX_.shake = 7 * power; FX_.snapT = 0;
+  sSnap(power);
+}
+function windOut(dir) {                           // 挥手 → 吹成纸屑
+  G.gust = (G.gust + 1) % 65535 || 1;
+  G.windDir = dir; G.windBack = false;
+  G.windFront = dir > 0 ? -30 : VW + 30;
+  FX_.windLines = [];
+  for (let k = 0; k < 6; k++) FX_.windLines.push({ y: VH * (0.3 + 0.08 * k + Math.random() * 0.04), ph: Math.random() * 6, a: 1 });
+  sWind(1);
+}
+function windBack() {                             // 反方向挥 → 吹回来
+  for (let i = 0; i < N; i++) if (LOOSE[i] > 0) { LOOSE[i] = 0; SK[i] = K_SOFT; }
+  G.windBack = true; G.windDir = -G.windDir; G.windFront = G.windDir > 0 ? -30 : VW + 30;
+  FX_.windLines = [];
+  for (let k = 0; k < 6; k++) FX_.windLines.push({ y: VH * (0.3 + 0.08 * k + Math.random() * 0.04), ph: Math.random() * 6, a: 1 });
+  sWind(-1);
+}
+function wave(dir) {
+  if (G.windCool > 0) return;
+  G.windCool = 0.55;
+  if (G.looseN > 0 && dir !== G.windDir) windBack(); else windOut(dir);
+}
+
+// 剪
+function cutBegin(x, y) { G.cutting = true; G.blade = { x, y }; G.bladeShow = { x, y }; G.cutPath = [{ x, y }]; }
+function cutMove(x, y) { if (G.cutting) G.blade = { x, y }; }
+function cutEnd() {
+  if (!G.cutting) return;
+  G.cutting = false;
+  const P = G.cutPath;
+  let len = 0; for (let k = 1; k < P.length; k++) len += Math.hypot(P[k].x - P[k - 1].x, P[k].y - P[k - 1].y);
+  FX_.cutLine = P.slice(); FX_.cutFlash = 1;
+  if (P.length > 3 && len > 60) {
+    // 刀线 + 首尾连线围成的那块，整片落下
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    for (const p of P) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
+    const idx = [];
+    for (let i = 0; i < N; i++) {
+      if (ST[i] !== 0) continue;
+      const x = PX[i], y = PY[i];
+      if (x < x0 || x > x1 || y < y0 || y > y1) continue;
+      if (inPoly(x, y, P)) idx.push(i);
+    }
+    if (idx.length > 12) {
+      let gx = 0, gy = 0; for (const i of idx) { gx += PX[i]; gy += PY[i]; } gx /= idx.length; gy /= idx.length;
+      const vx = (Math.random() - 0.5) * 90, vy = -140 - Math.random() * 60, w = (Math.random() < 0.5 ? -1 : 1) * (1.2 + Math.random());
+      for (const i of idx) {
+        ST[i] = 1; FX[i] = PX[i]; FY[i] = PY[i];
+        FVX[i] = vx - w * (PY[i] - gy); FVY[i] = vy + w * (PX[i] - gx);
+      }
+      G.lastCut = T; FX_.flash = Math.max(FX_.flash, 0.35);
+      sKacha(true);
+      return;
+    }
+  }
+  if (len > 20) sKacha(false);
+}
+function inPoly(x, y, P) {
+  let c = false;
+  for (let a = 0, b = P.length - 1; a < P.length; b = a++) {
+    const pa = P[a], pb = P[b];
+    if (((pa.y > y) !== (pb.y > y)) && (x < (pb.x - pa.x) * (y - pa.y) / (pb.y - pa.y) + pa.x)) c = !c;
+  }
+  return c;
+}
+function cutSegment(ax, ay, bx, by) {             // 刀口扫过的这一段：点顺着刀口掉下去
+  const dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy + 1e-6, len = Math.sqrt(L2);
+  const nx = -dy / len, ny = dx / len;
+  const x0 = Math.min(ax, bx) - 16, x1 = Math.max(ax, bx) + 16, y0 = Math.min(ay, by) - 16, y1 = Math.max(ay, by) + 16;
+  let n = 0;
+  for (let i = 0; i < N; i++) {
+    if (ST[i] !== 0) continue;
+    const x = PX[i], y = PY[i];
+    if (x < x0 || x > x1 || y < y0 || y > y1) continue;
+    let t = ((x - ax) * dx + (y - ay) * dy) / L2; t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const qx = x - (ax + dx * t), qy = y - (ay + dy * t), d2 = qx * qx + qy * qy;
+    if (d2 < 30) {
+      ST[i] = 1; FX[i] = x; FY[i] = y; n++;
+      FVX[i] = (Math.random() - 0.5) * 70 + dx * 2; FVY[i] = -40 + Math.random() * 70;
+    } else if (d2 < 220) {                        // 刀口两边的纸被推开一点，裂缝看得见
+      const s = (qx * nx + qy * ny) > 0 ? 1 : -1;
+      VX[i] += nx * s * 70; VY[i] += ny * s * 70;
+    }
+  }
+  if (n) { G.lastCut = T; if (G.snipT <= 0) { sSnip(); G.snipT = 0.075; } }
+  return n;
+}
+
+function effects(dt) {
+  // 刀：显示位置每帧追着手（60 帧补间），刀口扫过的整段都算剪到
+  if (G.cutting && G.blade) {
+    const b = G.bladeShow, tx = G.blade.x, ty = G.blade.y;
+    const nx = damp(b.x, tx, 30, dt), ny = damp(b.y, ty, 30, dt);
+    if (Math.hypot(nx - b.x, ny - b.y) > 0.3) {
+      cutSegment(b.x, b.y, nx, ny);
+      const last = G.cutPath[G.cutPath.length - 1];
+      if (Math.hypot(nx - last.x, ny - last.y) > 4) G.cutPath.push({ x: nx, y: ny });
+      if (G.cutPath.length > 400) G.cutPath.shift();
+    }
+    b.x = nx; b.y = ny;
+  }
+  // 风：风头从一边扫到另一边，经过哪个点就把哪个点吹起来
+  if (G.windFront !== null) {
+    const d = G.windDir;
+    G.windFront += d * 1900 * dt;
+    const f = G.windFront;
+    if (!G.windBack) {
+      for (let i = 0; i < N; i++) {
+        if (ST[i] !== 0 || GUST[i] === G.gust) continue;
+        if (d > 0 ? PX[i] > f : PX[i] < f) continue;
+        GUST[i] = G.gust;
+        VX[i] += d * (380 + 620 * KEEP[i]); VY[i] += (Math.random() - 0.62) * 300;
+        LOOSE[i] = 5.5 + Math.random() * 2.5;
+      }
+    }
+    for (const p of dust) if (d > 0 ? p.x < f : p.x > f) { if (Math.abs(p.x - f) < 40) p.vx += d * 160; }
+    if (f < -60 || f > VW + 60) G.windFront = null;
+  }
+  for (const w of FX_.windLines) w.a -= dt * 1.4;
+  FX_.windLines = FX_.windLines.filter(w => w.a > 0);
+  FX_.flash = Math.max(0, FX_.flash - dt * 2.6);
+  FX_.cutFlash = Math.max(0, FX_.cutFlash - dt * 2.2);
+  FX_.shake = Math.max(0, FX_.shake - dt * 30);
+  FX_.snapT += dt;
+  if (G.charging) G.charge = Math.min(1, G.charge + dt / 0.9);
+}
+
+// =============================================================
+//  氛围：灯 · 窗花投影 · 浮尘
+// =============================================================
+const LAMP = { x: VW / 2 - 200, y: VH * 0.52 - 300 };
+const SH = { W: VW / 4, H: VH / 4, ring: [], idx: 0, LAG: 7 };
+function shadowCanvas() {
+  if (!SH.ring.length) for (let k = 0; k < SH.LAG + 1; k++) { const c = document.createElement('canvas'); c.width = SH.W; c.height = SH.H; SH.ring.push(c); }
+  const c = SH.ring[SH.idx], g = c.getContext('2d');
+  g.globalCompositeOperation = 'source-over'; g.clearRect(0, 0, SH.W, SH.H);
+  g.globalCompositeOperation = 'lighter'; g.fillStyle = 'rgba(255,70,60,0.42)';
+  for (let i = 0; i < NPAP; i += 2) {
+    if (ST[i] === 0) g.fillRect(PX[i] / 4, PY[i] / 4, 0.9, 0.9);
+    else if (ST[i] === 1) g.fillRect(FX[i] / 4, FY[i] / 4, 0.9, 0.9);
+  }
+  SH.idx = (SH.idx + 1) % SH.ring.length;
+  return SH.ring[SH.idx];                          // 最旧的一张 = 慢半拍的影子
+}
+function drawShadow(ctx, live) {
+  if (!N) return;
+  const c = live ? shadowCanvas() : SH.ring[(SH.idx + SH.ring.length - 1) % SH.ring.length] || shadowCanvas();
+  const k = 1.2, lx = LAMP.x + (rot * 30), ly = LAMP.y;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = 0.11 + 0.12 * Math.min(1, LAY.e) + FX_.flash * 0.15;
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(c, 0, 0, SH.W, SH.H, lx - lx * k, ly - ly * k, VW * k, VH * k);
+  ctx.restore();
+}
+function drawLamp(ctx) {
+  const g = ctx.createRadialGradient(LAMP.x + 60, LAMP.y + 80, 10, LAMP.x + 60, LAMP.y + 80, 460);
+  g.addColorStop(0, 'rgba(255,170,110,0.05)'); g.addColorStop(1, 'rgba(255,170,110,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, VW, VH);
+}
+let dust = [];
+function initDust() {
+  for (let k = 0; k < 130; k++) dust.push({ x: Math.random() * VW, y: Math.random() * VH, vx: 0, vy: 0, s: 0.8 + Math.random() * 1.1, a: 0.15 + Math.random() * 0.4, ph: Math.random() * 6 });
+}
+function updateDust(dt) {
+  for (const p of dust) {
+    p.vx *= Math.exp(-1.6 * dt); p.vy *= Math.exp(-1.6 * dt);
+    p.x += (p.vx + Math.sin(T * 0.4 + p.ph) * 4) * dt; p.y += (p.vy - 7 - p.s * 3) * dt;
+    if (p.y < -4) { p.y = VH + 4; p.x = Math.random() * VW; }
+    if (p.x < -6) p.x = VW + 6; if (p.x > VW + 6) p.x = -6;
+  }
+}
+function drawDust(ctx) {
+  for (const p of dust) {
+    ctx.globalAlpha = p.a * (0.6 + 0.4 * Math.sin(T * 1.3 + p.ph));
+    ctx.fillStyle = 'rgb(255,226,200)';
+    ctx.fillRect(p.x, p.y, p.s, p.s);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// =============================================================
+//  渲染
+// =============================================================
+function renderPoster(g, k, trail) {
+  g.push();
+  g.scale(k);
+  const ctx = g.drawingContext;
+  ctx.globalCompositeOperation = 'source-over';
+  g.noStroke();
+  g.fill(6, 6, 9, 255);                            // 不留残影：每帧整张擦干净
+  g.rect(0, 0, VW, VH);
+  drawLamp(ctx);
+  drawGrid(g);
+  ctx.save();
+  if (trail && FX_.shake > 0) ctx.translate((Math.random() - 0.5) * FX_.shake, (Math.random() - 0.5) * FX_.shake);
+  // 影子先关（以后用「举高手透出影子」再加回来）
+  drawDust(ctx);
+  drawPaperCut(ctx);
+  drawEffects(ctx);
+  ctx.restore();
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+  drawUI(g);
+  g.pop();
+}
+
+function drawGrid(g) {
+  g.stroke(255, 9); g.strokeWeight(1);
+  for (let x = 0; x <= VW; x += 25) g.line(x, 0, x, VH);
+  for (let y = 0; y <= VH; y += 25) g.line(0, y, VW, y);
+  g.noStroke();
+}
+
+// 分身用的"底片"：把此刻的团花（带物理、剪口、风）画到一张小画布上，再按分身贴出去
+const SPR = { c: null, x: null, t: -1, R: 262, P: 512 };
+function sprite() {
+  if (!SPR.c) { SPR.c = document.createElement('canvas'); SPR.c.width = SPR.c.height = SPR.P; SPR.x = SPR.c.getContext('2d'); }
+  if (SPR.t === T) return SPR.c;
+  SPR.t = T;
+  const x = SPR.x, k = SPR.P / (2 * SPR.R);
+  x.setTransform(1, 0, 0, 1, 0, 0); x.clearRect(0, 0, SPR.P, SPR.P);
+  x.setTransform(k, 0, 0, k, SPR.P / 2 - LAY.cx * k, SPR.P / 2 - LAY.cy * k);
+  drawFlower(x, false);
+  return SPR.c;
+}
+const SPB = { c: null, x: null, t: -1, R: 262, P: 256 };
+function spriteBold() {                            // 远处的小团花：点画粗一点，缩小后花纹还认得出来
+  if (!SPB.c) { SPB.c = document.createElement('canvas'); SPB.c.width = SPB.c.height = SPB.P; SPB.x = SPB.c.getContext('2d'); }
+  if (SPB.t === T) return SPB.c;
+  SPB.t = T;
+  const x = SPB.x, k = SPB.P / (2 * SPB.R);
+  x.setTransform(1, 0, 0, 1, 0, 0); x.clearRect(0, 0, SPB.P, SPB.P);
+  x.setTransform(k, 0, 0, k, SPB.P / 2 - LAY.cx * k, SPB.P / 2 - LAY.cy * k);
+  x.globalCompositeOperation = 'lighter';
+  for (let col = 0; col < 2; col++) {
+    x.fillStyle = col ? RED2 : RED; x.globalAlpha = 0.34;
+    for (let i = 0; i < NPAP; i++) {
+      if (ST[i] !== 0) continue;
+      const p = paper[i % NP]; if (p.c !== col) continue;
+      x.fillRect(PX[i] - 1.3, PY[i] - 1.3, p.sz + 2.6, p.sz + 2.6);
+    }
+  }
+  if (LAY.e > 0.5) {
+    x.globalAlpha = Math.min(1, (LAY.e - 0.5) * 2) * 0.6;
+    for (let i = NPAP; i < N; i += 2) {
+      if (ST[i] !== 0) continue;
+      const L = lights[(i - NPAP) % NL];
+      x.fillStyle = L.lime ? 'rgb(182,255,60)' : 'rgb(120,230,255)';
+      x.fillRect(PX[i] - 1.5, PY[i] - 1.5, 4, 4);
+    }
+  }
+  x.globalAlpha = 1;
+  return SPB.c;
+}
+const SPS = { c: null, x: null, t: -1, R: 262, P: 512 };
+function spriteSil() {                             // 手背：团花的剪影，就是一张实心的红纸
+  if (!SPS.c) { SPS.c = document.createElement('canvas'); SPS.c.width = SPS.c.height = SPS.P; SPS.x = SPS.c.getContext('2d'); }
+  if (SPS.t === T) return SPS.c;
+  SPS.t = T;
+  const x = SPS.x, k = SPS.P / (2 * SPS.R);
+  x.setTransform(1, 0, 0, 1, 0, 0); x.clearRect(0, 0, SPS.P, SPS.P);
+  x.setTransform(k, 0, 0, k, SPS.P / 2 - LAY.cx * k, SPS.P / 2 - LAY.cy * k);
+  x.fillStyle = 'rgb(214,28,40)';
+  for (let i = 0; i < NPAP; i++) { if (ST[i] !== 0) continue; x.fillRect(PX[i] - 1.6, PY[i] - 1.6, paper[i % NP].sz + 3.2, paper[i % NP].sz + 3.2); }
+  return SPS.c;
+}
+function drawFlower(ctx, falling) {               // 原版团花：原版的点、颜色、大小
+  const e1 = Math.min(1, LAY.e), jit = G.charging ? G.charge * 1.8 : 0;
+  ctx.globalCompositeOperation = 'lighter';
+  for (let col = 0; col < 2; col++) {
+    ctx.fillStyle = col ? RED2 : RED; ctx.globalAlpha = 1;
+    for (let i = 0; i < NPAP; i++) {
+      const p = paper[i % NP];
+      if (p.c !== col) continue;
+      const st = ST[i];
+      if (st === 2 || (st === 1 && !falling)) continue;
+      let x, y;
+      if (st === 0) { x = PX[i]; y = PY[i]; if (jit) { x += (Math.random() - 0.5) * jit; y += (Math.random() - 0.5) * jit; } }
+      else { x = FX[i]; y = FY[i]; }
+      if (FADE[i] < 0.999) { ctx.globalAlpha = FADE[i]; ctx.fillRect(x, y, p.sz, p.sz); ctx.globalAlpha = 1; }
+      else ctx.fillRect(x, y, p.sz, p.sz);
+    }
+  }
+  // 镂空处的光：展开后才亮（原版）
+  if (e1 > 0.5) {
+    const glow = (e1 - 0.5) * 2;
+    for (let i = NPAP; i < N; i++) {
+      const st = ST[i]; if (st === 2 || (st === 1 && !falling)) continue;
+      const j = (i - NPAP) % NL, sct = ((i - NPAP) / NL) | 0, L = lights[j];
+      ctx.globalAlpha = glow * FADE[i] * (0.35 + 0.65 * (0.5 + 0.5 * Math.sin(T * 3 + L.seed + sct)));
+      ctx.fillStyle = L.lime ? 'rgb(182,255,60)' : 'rgb(120,230,255)';
+      ctx.fillRect(st === 0 ? PX[i] : FX[i], st === 0 ? PY[i] : FY[i], 1.6, 1.6);
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+function drawPaperCut(ctx) {
+  if (isSingle()) { drawFlower(ctx, true); return; }
+  const img = sprite(), R = SPR.R;
+  ctx.globalCompositeOperation = 'lighter';
+  for (const c of copies()) {
+    ctx.save();
+    ctx.translate(c.x, c.y); ctx.rotate(c.rot); ctx.scale(c.s * c.fx, c.s);
+    ctx.globalAlpha = c.a;
+    if (c.sil) { ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = c.a * 0.92; ctx.drawImage(spriteSil(), -R, -R, 2 * R, 2 * R); ctx.globalCompositeOperation = 'lighter'; }
+    else ctx.drawImage(c.s < 0.36 ? spriteBold() : img, -R, -R, 2 * R, 2 * R);
+    ctx.restore();
+  }
+  // 剪下来正在掉的纸片
+  ctx.globalAlpha = 1;
+  for (let col = 0; col < 2; col++) {
+    ctx.fillStyle = col ? RED2 : RED;
+    for (let i = 0; i < NPAP; i++) {
+      if (ST[i] !== 1) continue;
+      const p = paper[i % NP]; if (p.c !== col) continue;
+      ctx.fillRect(FX[i], FY[i], p.sz, p.sz);
+    }
+  }
+}
+
+function drawEffects(ctx) {
+  ctx.save();
+  // 甩开的一下：花心闪一下
+  if (FX_.flash > 0) {
+    const r = 40 + 140 * (1 - FX_.flash);
+    const g = ctx.createRadialGradient(LAY.cx, LAY.cy, 0, LAY.cx, LAY.cy, r);
+    g.addColorStop(0, 'rgba(255,235,220,' + 0.55 * FX_.flash + ')');
+    g.addColorStop(0.4, 'rgba(255,80,70,' + 0.25 * FX_.flash + ')');
+    g.addColorStop(1, 'rgba(255,60,60,0)');
+    ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = g;
+    ctx.fillRect(LAY.cx - r, LAY.cy - r, r * 2, r * 2);
+  }
+  ctx.globalCompositeOperation = 'source-over';
+  // 风
+  for (const w of FX_.windLines) {
+    const f = G.windFront === null ? (G.windDir > 0 ? VW : 0) : G.windFront;
+    ctx.strokeStyle = 'rgba(182,255,60,' + 0.45 * w.a + ')'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    const len = 260, x0 = f - G.windDir * len;
+    for (let s = 0; s <= 1.001; s += 0.05) {
+      const x = x0 + G.windDir * len * s, y = w.y + Math.sin(s * 6 + w.ph + T * 4) * 6;
+      s ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+    ctx.stroke();
+  }
+  // 刀线
+  if (G.cutting && G.cutPath.length > 1) {
+    ctx.strokeStyle = 'rgba(182,255,60,0.85)'; ctx.lineWidth = 1.2; ctx.setLineDash([5, 4]);
+    ctx.beginPath(); G.cutPath.forEach((p, k) => k ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)); ctx.lineTo(G.bladeShow.x, G.bladeShow.y); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  if (FX_.cutFlash > 0 && FX_.cutLine && FX_.cutLine.length > 1) {
+    ctx.strokeStyle = 'rgba(230,255,180,' + FX_.cutFlash + ')'; ctx.lineWidth = 1 + 2 * FX_.cutFlash;
+    ctx.beginPath(); FX_.cutLine.forEach((p, k) => k ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)); ctx.stroke();
+  }
+  if (G.cutting && G.bladeShow) scissors(ctx, G.bladeShow.x, G.bladeShow.y);
+  // 摄像头里的手 → 海报上的光标
+  if (CAM.hands.length && !G.cutting) {
+    for (const h of CAM.hands) {
+      ctx.strokeStyle = 'rgba(182,255,60,0.5)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(h.sx, h.sy, 9, 0, Math.PI * 2); ctx.stroke();
+      if (G.charging && h === CAM.prim) {
+        ctx.strokeStyle = 'rgba(182,255,60,0.95)'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(h.sx, h.sy, 15, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * G.charge); ctx.stroke();
+      }
+    }
+  }
+  if (PTR.charging && PTR.pt) {
+    ctx.strokeStyle = 'rgba(182,255,60,0.95)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(PTR.pt.x, PTR.pt.y, 18, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * G.charge); ctx.stroke();
+  }
+  ctx.restore();
+}
+function scissors(ctx, x, y) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(-0.6);
+  ctx.strokeStyle = 'rgb(182,255,60)'; ctx.lineWidth = 1.4;
+  ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(16, -5); ctx.moveTo(0, 0); ctx.lineTo(16, 5); ctx.stroke();
+  ctx.beginPath(); ctx.arc(-6, -5, 4, 0, Math.PI * 2); ctx.arc(-6, 5, 4, 0, Math.PI * 2); ctx.stroke();
+  ctx.restore();
+}
+
+// =============================================================
+//  版式（原版）
+// =============================================================
+const M = 32;
+function mono(g, sz, bold) { g.textFont('Consolas'); g.textStyle(bold ? BOLD : NORMAL); g.textSize(sz); }
+function cn(g, sz, bold)   { g.textFont('Microsoft YaHei'); g.textStyle(bold ? BOLD : NORMAL); g.textSize(sz); }
+
+const HINTS_CAM = [
+  '连招：握拳 → 张开 → 手往后拉 → 往前推 → 握拳',
+  '张开手 → 扇形扫开再翻开    握拳 → 折回一角',
+  '手往后拉 → 团花飘向远处    往前推 → 飘回来、穿进花心',
+  '拧手腕 → 团花转    手往左右上下移 → 团花倾斜'
+];
+const HINTS_TOUCH = [
+  '手指往上拖 → 团花飘向远处    往下拖 → 穿进花心',
+  '点一下 → 折起 / 展开    左右拖 → 团花转'
+];
+function statusText() {
+  if (G.demo) return '● 演示 DEMO';
+  if (G.thru > 0.3) return '● 穿过花心 THROUGH';
+  if (G.dep > 0.3) return '● 飘向远处 DEPTH';
+  if (Math.abs(rot) > 0.35) return '● 旋转 SPIN';
+  if (Math.abs(L3.yaw) + Math.abs(L3.pitch) > 0.25) return '● 倾斜 TILT';
+  return '';
+}
+function hintLine() {
+  const cam = camOK && CAM.on;
+  if (G.demo) return '演示 · 现在：' + G.demoLabel + '    ' + (cam ? '把手举到镜头前就能自己玩' : '用手指拖一拖就能自己玩');
+  const H = cam ? HINTS_CAM : HINTS_TOUCH;
+  return H[Math.floor(T / 4) % H.length];
+}
+
+function drawUI(g) {
+  g.textAlign(LEFT, BASELINE);
+
+  // 顶栏
+  mono(g, 10); g.fill(255, 150);
+  g.text('INTANGIBLE CULTURAL HERITAGE / NEW MEDIA', M, 30);
+  g.textAlign(RIGHT); g.text('NO.001 — 2026', VW - M, 30); g.textAlign(LEFT);
+  g.stroke(255, 90); g.strokeWeight(1); g.line(M, 40, VW - M, 40); g.noStroke();
+
+  // 标题
+  cn(g, 44, true); g.fill(240);
+  g.text('{ 数字剪纸 }', M - 4, 106);
+  cn(g, 18, true); g.fill(LIME);
+  g.text('非遗新生计划 · 掌中展开', M, 140);
+  mono(g, 11); g.fill(255, 120);
+  g.text('→ 创造者：胡奕君 + AI CREATE', M, 170);
+  g.text('→ 制造日：2026/11/18', M, 188);
+
+  // 徽章
+  g.fill(LIME); g.rect(VW - M - 168, 62, 168, 30);
+  g.fill(6, 6, 9); mono(g, 16, true);
+  g.text('PAPER-CUT', VW - M - 158, 83);
+  g.fill(230, 40, 50); g.rect(VW - M - 168, 92, 168, 20);
+  g.fill(255); cn(g, 11, true);
+  g.text('佛山剪纸 · 国家级非遗', VW - M - 158, 107);
+
+  // 竖排
+  g.push(); g.translate(VW - 14, 240); g.rotate(HALF_PI);
+  mono(g, 9); g.fill(255, 90);
+  g.text('FOLD  ·  CUT  ·  UNFOLD  ·  16-FOLD SYMMETRY  —  001', 0, 0);
+  g.pop();
+
+  // 底部
+  const by = VH - 150;
+  g.stroke(255, 90); g.line(M, by, VW - M, by); g.noStroke();
+
+  const b = Math.min(1, bloom);
+  mono(g, 10); g.fill(255, 130);
+  g.text('UNFOLD / 展开度', M, by + 24);
+  mono(g, 40, true); g.fill(240);
+  g.text(nf(b, 1, 2), M, by + 68);
+  g.fill(255, 40); g.rect(M, by + 80, 160, 3);
+  g.fill(LIME); g.rect(M, by + 80, 160 * b, 3);
+  cn(g, 12, true);
+  const stt = G.status;
+  if (stt) { g.fill(LIME); g.text(stt, M, by + 106); }
+  else {
+    g.fill(b > 0.85 ? g.color(LIME) : g.color(200));
+    g.text(b > 0.85 ? '● 团花 FULL BLOOM' : (b > 0.2 ? '● 展开中 UNFOLDING' : '● 折叠 FOLDED'), M, by + 106);
+  }
+
+  cn(g, 11, false); g.fill(255, 170);
+  const tx = 214;
+  g.text('握紧的，是一张纸；', tx, by + 30);
+  g.text('张开的，是一门手艺。', tx, by + 50);
+  g.text('一折一剪藏在掌心，', tx, by + 74);
+  g.text('展开时，花才完整。', tx, by + 94);
+
+  // 摄像头小窗
+  const cw = 128, ch = 96, cx = VW - M - cw, cy = by + 20;
+  mono(g, 9); g.fill(255, 130);
+  g.text('CAM_01 / INPUT', cx, cy - 4);
+  const ctx = g.drawingContext;
+  if (camOK) drawCamBox(ctx, cx, cy + 2, cw, ch);
+  g.noFill(); g.stroke(255, 110); g.rect(cx, cy + 2, cw, ch); g.noStroke();
+  if (!camOK) { mono(g, 9); g.fill(255, 100); g.text(CAM.state === 'loading' ? 'LOADING…' : 'NO CAMERA', cx + 36, cy + 54); }
+
+  cn(g, 11, false); g.fill(255, 120, 120);
+  g.text(hintLine(), M, VH - 24);
+  mono(g, 9); g.fill(255, 90); g.textAlign(RIGHT);
+  g.text('A0 · 841 × 1189 MM', VW - M, VH - 24);
+  g.textAlign(LEFT);
+}
+
+// 摄像头小窗：镜像画面 + 两只手的骨架
+function drawCamBox(ctx, x0, y0, w, h) {
+  const v = CAM.video, vw = v.videoWidth, vh = v.videoHeight;
+  if (!vw) return;
+  const srcW = Math.min(vw, vh * w / h), srcH = srcW * h / w, sx = (vw - srcW) / 2, sy = (vh - srcH) / 2;
+  ctx.save();
+  ctx.globalAlpha = 120 / 255;
+  ctx.translate(x0 + w, y0); ctx.scale(-1, 1);
+  ctx.drawImage(v, sx, sy, srcW, srcH, 0, 0, w, h);
+  ctx.restore();
+  ctx.save();
+  ctx.strokeStyle = 'rgb(182,255,60)'; ctx.lineWidth = 1;
+  for (const hd of CAM.hands) {
+    const P = hd.lm.map(p => ({ x: x0 + (((1 - p.x) * vw) - sx) / srcW * w, y: y0 + (p.y * vh - sy) / srcH * h }));
+    ctx.beginPath();
+    for (const f of [[0,1,2,3,4],[0,5,6,7,8],[0,9,10,11,12],[0,13,14,15,16],[0,17,18,19,20]])
+      for (let i = 0; i < f.length - 1; i++) { ctx.moveTo(P[f[i]].x, P[f[i]].y); ctx.lineTo(P[f[i + 1]].x, P[f[i + 1]].y); }
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// =============================================================
+//  摄像头 · MediaPipe 双手（比原版 ml5 更快，能同时看两只手）
+// =============================================================
+const CAM = { on: false, state: '', lm: null, video: null, lastVT: -1, hands: [], prim: null, inject: null };
+class OneEuro {                                   // 防抖：慢动时稳，快动时不拖
+  constructor(minCut = 1.5, beta = 0.03) { this.mc = minCut; this.b = beta; this.x = null; this.dx = 0; }
+  f(x, dt) {
+    if (this.x === null) { this.x = x; return x; }
+    const a = c => 1 / (1 + 1 / (2 * Math.PI * c * dt));
+    const dx = (x - this.x) / dt; this.dx += (dx - this.dx) * a(1);
+    this.x += (x - this.x) * a(this.mc + this.b * Math.abs(this.dx));
+    return this.x;
+  }
+}
+function b64(str) { const s = atob(str), u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u; }
+function loadScript(src) {
+  return new Promise((ok, no) => { const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = no; document.head.appendChild(s); });
+}
+async function makeLandmarker() {
+  const CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
+  const online = /^https?:$/.test(location.protocol);
+  const tries = [];
+  if (BUILD === 'folder' && online) tries.push({ base: new URL('lib/mediapipe', location.href).href, model: { modelAssetPath: new URL('lib/hand_landmarker.task', location.href).href } });
+  if (BUILD === 'folder' && !online) tries.push({ offline: true });
+  if (BUILD === 'folder' && !online) tries.push({ base: CDN, model: 'embedded' });
+  tries.push({ base: CDN, model: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task' } });
+  let lastErr;
+  for (const t of tries) {
+    try {
+      let vision, fs, mo = t.model;
+      if (t.offline) {                              // 断网也能用：识别程序和模型全在 lib/offline 里
+        for (const f of ['vision_bundle', 'wasm_loader', 'wasm_binary']) await loadScript('lib/offline/' + f + '.js');
+        const blob = (d, type) => URL.createObjectURL(new Blob([d], { type }));
+        vision = await import(blob(window.__MP_BUNDLE, 'text/javascript'));
+        fs = { wasmLoaderPath: blob(window.__MP_LOADER, 'text/javascript'), wasmBinaryPath: blob(b64(window.__MP_WASM), 'application/wasm') };
+        mo = 'embedded';
+      } else {
+        vision = await import(t.base + '/vision_bundle.mjs');
+        fs = await vision.FilesetResolver.forVisionTasks(t.base + '/wasm');
+      }
+      if (mo === 'embedded') {                      // 双击打开的本地文件：模型放在 lib/hand_model.js 里
+        if (!window.__HAND_MODEL) await loadScript('lib/hand_model.js');
+        mo = { modelAssetBuffer: b64(window.__HAND_MODEL) };
+      }
+      const opts = d => ({ baseOptions: Object.assign({ delegate: d }, mo), runningMode: 'VIDEO', numHands: 2,
+        minHandDetectionConfidence: 0.55, minHandPresenceConfidence: 0.55, minTrackingConfidence: 0.5 });
+      try { return await vision.HandLandmarker.createFromOptions(fs, opts('GPU')); }
+      catch (_) { return await vision.HandLandmarker.createFromOptions(fs, opts('CPU')); }
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr;
+}
+async function startCamera() {
+  CAM.video = document.getElementById('vid');
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+  } catch (err) {
+    if (BUILD === 'folder') say('没拿到摄像头：请在地址栏旁边允许使用摄像头，然后刷新。现在可以用鼠标玩。', 6000);
+    return;
+  }
+  CAM.video.srcObject = stream;
+  try { await CAM.video.play(); } catch (_) {}
+  camOK = true; CAM.state = 'loading';
+  say('正在加载手势识别（第一次要几秒）……', 15000);
+  try { CAM.lm = await makeLandmarker(); }
+  catch (e) {
+    CAM.state = 'fail';
+    say('手势模型没加载出来：请确认 lib 文件夹和 index.html 在同一个文件夹里，然后刷新。现在可以用鼠标玩。', 9000);
+    return;
+  }
+  CAM.on = true; CAM.state = 'on';
+  say('摄像头好了：把手举到镜头前，先握拳停一下，再猛地张开。', 4000);
+}
+
+// 21 个关键点 → 这只手现在是什么姿势
+function analyze(lm, vw, vh) {
+  const P = lm.map(p => ({ x: (1 - p.x) * vw, y: p.y * vh }));   // 镜像，像照镜子
+  const D = (a, b) => Math.hypot(P[a].x - P[b].x, P[a].y - P[b].y);
+  const size = D(0, 9) + 1e-3;
+  let cx = 0, cy = 0; for (const i of [0, 5, 9, 13, 17]) { cx += P[i].x / 5; cy += P[i].y / 5; }
+  // 张开度只看中指、无名指、小指：捏剪刀时食指弯下去，花不会跟着合上
+  const open = Math.min(1, Math.max(0, ((D(12, 0) + D(16, 0) + D(20, 0)) / 3 / size - 1.15) / 0.7));
+  // 五指撑开程度：食指尖到小指尖 ÷ 手掌宽（食指根到小指根）。并拢约 1.2，使劲撑开约 2.2
+  const spread = D(8, 20) / (D(5, 17) + 1e-3);
+  // 手指弯曲角度（用 3D 坐标）：手侧过来、离远离近都认得准
+  const V = i => [lm[i].x * vw, lm[i].y * vh, (lm[i].z || 0) * vw];
+  const bend = (a, b, c) => { const A = V(a), B = V(b), C = V(c);
+    const u = [B[0] - A[0], B[1] - A[1], B[2] - A[2]], w = [C[0] - B[0], C[1] - B[1], C[2] - B[2]];
+    const d = (u[0] * w[0] + u[1] * w[1] + u[2] * w[2]) / (Math.hypot(...u) * Math.hypot(...w) + 1e-6);
+    return Math.acos(Math.max(-1, Math.min(1, d))); };
+  let bs = 0;
+  for (const [m, q, r, t] of [[5, 6, 7, 8], [9, 10, 11, 12], [13, 14, 15, 16], [17, 18, 19, 20]]) bs += bend(0, m, q) + bend(m, q, r) + bend(q, r, t);
+  const openA = 1 - Math.min(1, Math.max(0, (bs / 4 - 0.55) / 2.6));
+  const openM = Math.min(1, Math.max(0, (open * 0.45 + openA * 0.55 - 0.08) / 0.84));
+  // 拧手腕：手腕 → 中指根 这条线偏离竖直的角度
+  const roll = Math.atan2(P[9].x - P[0].x, -(P[9].y - P[0].y));
+  const ax = lm[5].x - lm[0].x, ay = lm[5].y - lm[0].y, bx = lm[17].x - lm[0].x, by = lm[17].y - lm[0].y;
+  const cr = (ax * by - ay * bx) * vw * vh / (size * size);     // 手心 / 手背：翻过来这个数会变号
+  return { lm, cx, cy, size, cr, open: openM, roll, spread, pinchR: D(4, 8) / size, midOut: D(12, 0) / size, px: (P[4].x + P[8].x) / 2, py: (P[4].y + P[8].y) / 2 };
+}
+// 摄像头画面中间的一块对到整张海报，手不用伸到画面边上
+function toPoster(x, y, vw, vh) {
+  return { x: (x / vw - 0.15) / 0.7 * VW, y: (y / vh - 0.12) / 0.76 * VH };
+}
+
+function camUpdate(dt) {
+  let fresh = null, vw = 1280, vh = 720;
+  if (CAM.inject) { fresh = CAM.inject; }                       // 测试用
+  else if (CAM.on && CAM.lm) {
+    const v = CAM.video;
+    if (v.readyState >= 2 && v.currentTime !== CAM.lastVT) {
+      CAM.lastVT = v.currentTime;
+      let res = null;
+      try { res = CAM.lm.detectForVideo(v, performance.now()); } catch (_) {}
+      fresh = (res && res.landmarks) || [];
+      vw = v.videoWidth; vh = v.videoHeight;
+    }
+  }
+  if (fresh) {
+    const raw = fresh.map(l => analyze(l, vw, vh)), next = [];
+    for (const h of raw) {                                       // 新一帧的手和上一帧最近的那只对上
+      let best = null, bd = 1e9;
+      for (const o of CAM.hands) { if (next.includes(o)) continue; const d = Math.hypot(o.rx - h.cx, o.ry - h.cy); if (d < bd) { bd = d; best = o; } }
+      const o = best && bd < vw * 0.25 ? best
+        : { fx: new OneEuro(), fy: new OneEuro(), bx: new OneEuro(2.2, 0.08), by: new OneEuro(2.2, 0.08), open: h.open, roll: h.roll, spread: h.spread, vx: 0, vy: 0, sx: null, sy: null, pinch: false, t: 0 };
+      const sdt = Math.max(1 / 90, T - o.t || 1 / 30); o.t = T;
+      o.rx = h.cx; o.ry = h.cy; o.lm = h.lm; o.size = h.size;
+      o.szS = o.szS ? o.szS + (h.size - o.szS) * 0.35 : h.size;          // 手离镜头远近（手掌在画面里多大）
+      o.age = (o.age || 0) + sdt;
+      if (o.age < 0.5) o.base = o.szS; else o.base += (o.szS - o.base) * sdt * 0.03;   // 刚举手时的大小当基准，之后慢慢跟
+      if (o.sign0 === undefined) { if (Math.abs(h.cr) > 0.15) o.sign0 = Math.sign(h.cr); o.backF = 0; }   // 刚举手默认是手心
+      else if (h.cr * o.sign0 < -0.2) o.backF = 1; else if (h.cr * o.sign0 > 0.2) o.backF = 0;
+      const s = toPoster(h.cx, h.cy, vw, vh), fx = o.fx.f(s.x, sdt), fy = o.fy.f(s.y, sdt);
+      if (o.sx !== null) { o.vx += ((fx - o.sx) / sdt - o.vx) * 0.6; o.vy += ((fy - o.sy) / sdt - o.vy) * 0.6; }
+      o.sx = fx; o.sy = fy; o.open += (h.open - o.open) * 0.7; o.roll += (h.roll - o.roll) * 0.6; o.spread += (h.spread - o.spread) * 0.5;
+      // 捏合：捏得很紧才算拿起剪刀，松开一些才算放下（防止剪一半断掉）
+      if (!o.pinch && h.pinchR < 0.3 && h.midOut > 1.2) o.pinch = true;
+      else if (o.pinch && h.pinchR > 0.5) o.pinch = false;
+      const bp = toPoster(h.px, h.py, vw, vh); o.bx_ = o.bx.f(bp.x, sdt); o.by_ = o.by.f(bp.y, sdt);
+      next.push(o);
+    }
+    CAM.hands = next;
+    gestures(dt);
+  }
+  hasHand = CAM.hands.length > 0;
+}
+
+function gestures(dt) {
+  const hs = CAM.hands;
+  if (!hs.length) {
+    CAM.prim = null;
+    G.lahT = 0; G.thruT = 0; G.backT = 0; G.depT = 0;
+    if (!PTR.active) { bloomT = 0.05; rotT = 0; L3.spreadT = 0; L3.yawT = 0; L3.pitchT = 0; }   // 原版：没看到手 = 折起来
+    return;
+  }
+  const prim = hs.length === 2 ? (hs[0].size >= hs[1].size ? hs[0] : hs[1]) : hs[0];
+  CAM.prim = prim;
+  bloomT = prim.open;                                          // 原版：张开 = 展开，握拳 = 折起
+  { const r = prim.roll, dz = 0.12; rotT = (Math.abs(r) < dz ? 0 : r - Math.sign(r) * dz) * 2.6; }  // 手腕稍微歪一点不算，免得花自己乱转                                      // 拧手腕 → 团花跟着转（手腕转 ±75° ≈ 团花转一整圈）
+  L3.yawT = (prim.sx / VW - 0.5) * 3.2;                        // 手往左，花朝左倾，幅度大到能看见侧面
+  L3.pitchT = (prim.sy / VH - 0.52) * 2.4;                     // 手往上，花朝上倾
+  L3.spreadT = 0;                                              // 拆五层去掉了
+  const r = prim.szS / prim.base;                              // <1 手往后拉，>1 手往前推
+  G.lahT = 0;
+  G.depT = Math.min(1, Math.max(0, (0.97 - r) / 0.42));        // 手往后拉：团花往深处飘，一朵接一朵
+  G.thruT = sstep(1.18, 1.55, r);                              // 推近：穿进花心
+  G.backT = 0;
+}
+
+// =============================================================
+//  没有摄像头：手指 / 鼠标
+// =============================================================
+const PTR = { active: false, down: false, x: VW / 2, y: VH / 2, sx: 0, sy: 0, t0: 0, mv: 0 };
+function initPointer(el) {
+  const pos = e => { const r = el.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * VW, y: (e.clientY - r.top) / r.height * VH }; };
+  el.addEventListener('pointerdown', e => { audioOn(); el.setPointerCapture(e.pointerId); const p = pos(e); PTR.x = p.x; PTR.y = p.y; PTR.sx = p.x; PTR.sy = p.y; PTR.t0 = T; PTR.mv = 0; PTR.down = true; PTR.active = true; G.ptrRecent = T; e.preventDefault(); });
+  el.addEventListener('pointermove', e => { const p = pos(e); PTR.x = p.x; PTR.y = p.y; if (PTR.down) PTR.mv = Math.max(PTR.mv, Math.hypot(p.x - PTR.sx, p.y - PTR.sy)); G.ptrRecent = T; });
+  const up = () => { if (PTR.down && T - PTR.t0 < 0.3 && PTR.mv < 14) G.ptrFold = !G.ptrFold; PTR.down = false; G.ptrRecent = T; };   // 点一下 = 折起 / 展开
+  el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
+  el.addEventListener('contextmenu', e => e.preventDefault());
+}
+function pointerUpdate(dt) {                                    // 没有摄像头时：鼠标/手指位置 = 倾斜，按住 = 拆层
+  if (CAM.hands.length) return;
+  const recent = T - G.ptrRecent < 4;
+  PTR.active = PTR.down || recent;
+  if (!PTR.active) { if (!CAM.on) { bloomT = 1; L3.spreadT = 0; L3.yawT = 0; L3.pitchT = 0; G.depT = 0; G.thruT = 0; rotT = 0; } return; }
+  bloomT = G.ptrFold ? 0.05 : 1;
+  L3.yawT = 0; L3.pitchT = 0; L3.spreadT = 0;
+  if (PTR.down) {                                               // 手指往上拖 = 飘向远处，往下拖 = 穿进花心，左右拖 = 转
+    const dx = PTR.x - PTR.sx, dy = PTR.y - PTR.sy;
+    G.depT = Math.min(1, Math.max(0, -dy / 230)); G.thruT = sstep(40, 210, dy); rotT = dx / 110;
+  } else { G.depT = 0; G.thruT = 0; rotT = 0; }
+}
+
+// =============================================================
+//  声音（全部用代码合成，没有音频文件）
+// =============================================================
+const AU = { ctx: null, on: true };
+function audioOn() {
+  try {
+    if (!AU.ctx) {
+      AU.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const n = AU.ctx.sampleRate, b = AU.ctx.createBuffer(1, n, n), d = b.getChannelData(0);
+      for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+      AU.noise = b; AU.out = AU.ctx.createGain(); AU.out.gain.value = 0.7; AU.out.connect(AU.ctx.destination);
+    }
+    if (AU.ctx.state !== 'running') AU.ctx.resume();
+  } catch (_) {}
+}
+function au() { return AU.on && AU.ctx && AU.ctx.state === 'running' ? AU.ctx : null; }
+function sNoise(dur, type, f0, f1, q, vol, att = 0.002, delay = 0) {
+  const c = au(); if (!c) return;
+  const t = c.currentTime + delay, s = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain();
+  s.buffer = AU.noise; f.type = type; f.Q.value = q;
+  f.frequency.setValueAtTime(f0, t); f.frequency.exponentialRampToValueAtTime(f1, t + dur);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + att); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  s.connect(f); f.connect(g); g.connect(AU.out); s.start(t, Math.random() * 0.5); s.stop(t + dur + 0.02);
+}
+function sTone(f0, f1, dur, vol, type = 'sine', delay = 0) {
+  const c = au(); if (!c) return;
+  const t = c.currentTime + delay, o = c.createOscillator(), g = c.createGain();
+  o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.004); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(AU.out); o.start(t); o.stop(t + dur + 0.02);
+}
+function sSnip() { sNoise(0.03, 'highpass', 4200, 6000, 0.8, 0.28); }
+function sKacha(big) {
+  sNoise(0.035, 'highpass', 3800, 5500, 0.8, 0.45); sNoise(0.04, 'highpass', 3200, 5200, 0.8, 0.5, 0.002, 0.06);
+  if (big) { sTone(150, 55, 0.22, 0.4, 'sine', 0.06); sNoise(0.35, 'lowpass', 1500, 180, 0.7, 0.25, 0.01, 0.07); }
+}
+function sSnap(p) {
+  sNoise(0.42, 'bandpass', 380, 3600, 0.9, 0.55 * p + 0.15, 0.01);
+  sTone(110, 42, 0.4, 0.55 * p + 0.2);
+  sNoise(0.06, 'highpass', 3000, 6000, 0.7, 0.35);
+}
+function sSplit(lv) {                             // 一分为多：低音"咚" + 纸"嚓"；拉远那一下加一道呼的风声
+  sTone([0, 150, 200, 110][lv], [0, 72, 95, 40][lv], lv === 3 ? 0.4 : 0.16, 0.5);
+  sNoise(0.05, 'highpass', 3000, 5600, 0.8, 0.4);
+  if (lv === 1) sNoise(0.18, 'bandpass', 700, 2400, 0.9, 0.3, 0.004, 0.01);       // 对折撕开
+  if (lv === 2) sNoise(0.3, 'bandpass', 1800, 600, 1.0, 0.3, 0.01);                // 甩出一圈
+  if (lv === 3) sNoise(0.55, 'bandpass', 2600, 300, 0.9, 0.42, 0.02);              // 镜头往后拉
+}
+function sMerge(lv) {                             // 合拢：往上收；冲回一个时风声反过来
+  sTone(90, 170, 0.12, 0.35);
+  sNoise(lv === 2 ? 0.45 : 0.1, 'bandpass', lv === 2 ? 300 : 2600, lv === 2 ? 2600 : 900, 0.9, 0.3);
+}
+function sLayer(k, out) {                          // 一层分开 / 合上：纸"嗒"一声，越外层越低
+  sNoise(0.05, 'bandpass', out ? 2600 - k * 300 : 1800 - k * 200, out ? 3800 - k * 350 : 1200 - k * 150, 1.2, 0.22, 0.002, 0);
+  sTone(out ? 420 - k * 50 : 300 - k * 40, out ? 360 - k * 45 : 260 - k * 35, 0.06, 0.12);
+}
+function sWind(dir) { dir > 0 ? sNoise(0.7, 'bandpass', 500, 2400, 1.1, 0.4, 0.09) : sNoise(0.6, 'bandpass', 2400, 500, 1.1, 0.35, 0.08); }
+
+// =============================================================
+//  提示 & 键盘 & 导出
+// =============================================================
+let sayT = null;
+function say(t, ms) {
+  const m = document.getElementById('msg'); m.textContent = t; m.style.display = 'block';
+  clearTimeout(sayT); if (ms) sayT = setTimeout(() => m.style.display = 'none', ms);
+}
+function keyPressed() {
+  audioOn();
+  if (key === 's' || key === 'S') saveCanvas('paper-cut-screen', 'png');
+  if (key === 'm' || key === 'M') { AU.on = !AU.on; say(AU.on ? '声音开' : '静音', 1200); }
+  if (key === 'p' || key === 'P') {
+    say('正在导出 A0 海报，请稍等几秒…');
+    setTimeout(() => {
+      const g = createGraphics(Math.round(VW * A0_K), Math.round(VH * A0_K));
+      g.pixelDensity(1);
+      renderPoster(g, A0_K, false);
+      saveCanvas(g, 'paper-cut-A0-' + A0_DPI + 'dpi', 'png');
+      g.remove();
+      say('A0 海报已导出到"下载"文件夹', 2500);
+    }, 50);
+  }
+}
+function keyReleased() {
+}
+
+// 测试接口
+window.__jz = {
+  G, FX_, CAM, PTR,
+  advance(sec) { for (let t = 0; t < sec; t += 1 / 60) step(1 / 60); renderPoster(p5.instance, K, true); },
+  render() { renderPoster(p5.instance, K, true); },
+  tick(sec) { for (let t = 0; t < sec - 1e-6; t += 1 / 60) step(1 / 60); },
+  snap, windOut, windBack, wave, cutBegin, cutMove, cutEnd, healAll,
+  setLah(v, ang = 0) { G.lahT = v; G.lahAngT = ang; },
+  state: () => ({ bloom, bloomT, lah: G.lah, det: G.detached, loose: G.looseN, status: G.status, hands: CAM.hands.length, pinch: CAM.prim && CAM.prim.pinch, charging: G.charging, cutting: G.cutting })
+};
+</script>
+</body>
+</html>
