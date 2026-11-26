@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>数字剪纸 · 分镜</title>
+<style>
+  html, body { margin: 0; background: #050307; overflow: hidden; }
+  canvas { display: block; }
+  #vig { position: fixed; inset: 0; pointer-events: none; background: radial-gradient(ellipse at 50% 48%, transparent 45%, rgba(0,0,0,0.75) 100%); }
+</style>
+<script type="importmap">{ "imports": { "three": "./lib/three/three.module.min.js", "three/addons/": "./lib/three/addons/" } }</script>
+<script src="tuanhua.js"></script>
+</head>
+<body>
+<div id="vig"></div>
+<script type="module">
+// =============================================================
+//  分镜静帧：?s=招式编号(2..6) &p=这一招进行到多少(0..1)
+//  和正式作品用同一套技术：Three.js + HDR 辉光，画面就是实际会跑出来的样子
+// =============================================================
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+const Q = new URLSearchParams(location.search);
+const STAGE = +(Q.get('s') || 6), PROG = +(Q.get('p') || 0.6);
+const W = +(Q.get('w') || 900), H = Math.round(W * 1.414);
+
+// 固定随机数：每次渲染同一张图
+let seed = 7 + STAGE * 101;
+const rnd = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+const ease = x => x < 0 ? 0 : x > 1 ? 1 : 1 - Math.pow(1 - x, 3);
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setSize(W, H); renderer.setPixelRatio(1);
+renderer.toneMapping = THREE.NoToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x050307);
+const camera = new THREE.PerspectiveCamera(40, W / H, 1, 20000);
+
+// ---------- 团花贴图：SVG → 画布 ----------
+async function patternCanvas(size) {
+  const svg = Tuanhua.svg({ mode: 'mask', size });
+  const img = new Image();
+  img.src = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
+  await img.decode();
+  const c = document.createElement('canvas'); c.width = c.height = size;
+  c.getContext('2d').drawImage(img, 0, 0, size, size);
+  return c;
+}
+const PC = await patternCanvas(2048);
+const tex = new THREE.CanvasTexture(PC); tex.anisotropy = 8; tex.colorSpace = THREE.NoColorSpace;
+const PIX = PC.getContext('2d').getImageData(0, 0, 2048, 2048).data;
+const paperAt = (u, v) => PIX[((Math.floor(v * 2047)) * 2048 + Math.floor(u * 2047)) * 4] > 128;
+
+// 团花材质：红纸 + 金色刀口 + 折扇展开(wipe) + 从里往外显现(reveal)
+function flowerMat(o = {}) {
+  return new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, side: THREE.DoubleSide,
+    uniforms: { map: { value: tex }, wipe: { value: o.wipe ?? 1 }, reveal: { value: o.reveal ?? 2 }, heat: { value: o.heat ?? 1 }, alpha: { value: o.alpha ?? 1 }, front: { value: o.front ?? 1 } },
+    vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.); }`,
+    fragmentShader: `
+      uniform sampler2D map; uniform float wipe, reveal, heat, alpha, front; varying vec2 vUv;
+      void main(){
+        float a = texture2D(map, vUv).r;
+        float s = 0.;
+        for (int i = 0; i < 8; i++) { float an = float(i) * 0.785398; s += texture2D(map, vUv + vec2(cos(an), sin(an)) * 0.0011).r; }
+        s /= 8.;
+        float edge = clamp((a - s) * 3.0, 0., 1.);
+        vec2 p = vUv - 0.5; float r = length(p) * 2.;
+        float ang = atan(p.x, -p.y) / 6.28318 + 0.5;
+        float rv = reveal + 0.025 * sin(ang * 6.28318 * 7.) + 0.015 * sin(ang * 6.28318 * 19. + 1.3);
+        float vis = step(ang, wipe) * smoothstep(rv + 0.005, rv - 0.02, r);
+        vec3 red = mix(vec3(0.62, 0.008, 0.012), vec3(0.30, 0.002, 0.006), r * r);
+        vec3 col = mix(red * a, vec3(1.0, 0.66, 0.28) * heat * 1.3, edge);
+        float fr = smoothstep(0.025, 0.0, abs(r - rv)) * front * step(reveal, 1.2);
+        float fw = smoothstep(0.03, 0.0, abs(ang - wipe)) * step(wipe, 0.999) * front;
+        col += vec3(1.0, 0.55, 0.18) * (fr + fw) * 1.6 * max(a, edge);
+        gl_FragColor = vec4(col, max(a, edge * 0.8) * vis * alpha);
+      }`
+  });
+}
+function flower(size, o) { return new THREE.Mesh(new THREE.PlaneGeometry(size, size), flowerMat(o)); }
+
+// 光晕贴片（加色）
+const glowTex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 256; const x = c.getContext('2d');
+  const g = x.createRadialGradient(128, 128, 0, 128, 128, 128);
+  g.addColorStop(0, 'rgba(255,240,210,1)'); g.addColorStop(0.15, 'rgba(255,170,70,0.8)'); g.addColorStop(0.45, 'rgba(255,70,20,0.25)'); g.addColorStop(1, 'rgba(255,40,10,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 256, 256); return new THREE.CanvasTexture(c);
+})();
+function glow(size, intensity = 1, color = 0xffffff) {
+  const m = new THREE.SpriteMaterial({ map: glowTex, color: new THREE.Color(color).multiplyScalar(intensity), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true });
+  const s = new THREE.Sprite(m); s.scale.set(size, size, 1); return s;
+}
+
+// 火星（加色点）
+function embers(n, place, size = 6, hot = 2.5) {
+  const pos = new Float32Array(n * 3), col = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    const p = place(i); pos.set(p, i * 3);
+    const k = rnd(); const c = new THREE.Color().setHSL(0.06 + 0.06 * k, 1, 0.55 + 0.2 * k).multiplyScalar(hot * (0.4 + rnd()));
+    col.set([c.r, c.g, c.b], i * 3);
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  return new THREE.Points(g, new THREE.PointsMaterial({ size, map: glowTex, vertexColors: true, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, sizeAttenuation: true }));
+}
+
+// 纸片碎屑：每片是一个小三角，红纸 + 发烫的金边
+const shardMat = new THREE.ShaderMaterial({
+  transparent: true, depthWrite: false, side: THREE.DoubleSide,
+  vertexShader: `attribute float heat; attribute vec3 bary; varying vec3 vB; varying float vH;
+    void main(){ vB = bary; vH = heat;
+      gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position,1.); }`,
+  fragmentShader: `varying vec3 vB; varying float vH;
+    void main(){ float e = min(min(vB.x, vB.y), vB.z); float rim = smoothstep(0.16, 0.0, e);
+      vec3 c = mix(vec3(0.55,0.006,0.01), vec3(1.0,0.6,0.2) * (0.7 + 1.6 * vH), rim * (0.4 + 0.6 * vH)) + vec3(1.0,0.3,0.05) * vH * vH * 0.8;
+      gl_FragColor = vec4(c, 1.); }`
+});
+
+function shards(list) {          // list: [{x,y,z, rx,ry,rz, s, heat}]
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array([-0.5, -0.4, 0, 0.55, -0.3, 0, -0.1, 0.6, 0]), 3));
+  g.setAttribute('bary', new THREE.BufferAttribute(new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1]), 3));
+  const heat = new Float32Array(list.length);
+  const m = new THREE.InstancedMesh(g, shardMat, list.length);
+  const o = new THREE.Object3D();
+  list.forEach((q, i) => { o.position.set(q.x, q.y, q.z); o.rotation.set(q.rx, q.ry, q.rz); o.scale.setScalar(q.s); o.updateMatrix(); m.setMatrixAt(i, o.matrix); heat[i] = q.heat; });
+  g.setAttribute('heat', new THREE.InstancedBufferAttribute(heat, 1));
+  return m;
+}
+
+// 剪纸纸带：沿螺旋的一条带子，两边是锯齿刀口，边缘烧着金光
+function ribbon(pts, width, o = {}) {
+  const n = pts.length, pos = new Float32Array(n * 2 * 3), uv = new Float32Array(n * 2 * 2), idx = [];
+  for (let i = 0; i < n; i++) {
+    const p = pts[i], q = pts[Math.min(n - 1, i + 1)], pr = pts[Math.max(0, i - 1)];
+    const t = new THREE.Vector3().subVectors(q, pr).normalize();
+    const out = new THREE.Vector3(p.x, 0, p.z).normalize();
+    const tw = (o.twist || 0) * i / n;
+    const b = new THREE.Vector3().crossVectors(t, out).normalize().applyAxisAngle(t, tw);
+    const wv = width * Math.sin(Math.PI * Math.min(1, (i / (n - 1)) * 1.1)) ;
+    pos.set([p.x + b.x * wv, p.y + b.y * wv, p.z + b.z * wv, p.x - b.x * wv, p.y - b.y * wv, p.z - b.z * wv], i * 6);
+    uv.set([i / (n - 1), 1, i / (n - 1), 0], i * 4);
+    if (i < n - 1) idx.push(i * 2, i * 2 + 1, i * 2 + 2, i * 2 + 1, i * 2 + 3, i * 2 + 2);
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); g.setIndex(idx);
+  const mat = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.NormalBlending,
+    uniforms: { len: { value: o.len || 40 }, fade: { value: o.fade ?? 1 } },
+    vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.); }`,
+    fragmentShader: `uniform float len, fade; varying vec2 vUv;
+      void main(){
+        float y = abs(vUv.y - 0.5) * 2.;
+        float tooth = abs(fract(vUv.x * len) - 0.5) * 2.;             // 锯齿刀口
+        float edgeLimit = 0.86 + 0.14 * tooth;
+        if (y > edgeLimit) discard;
+        float hole = step(0.82, 1.0 - length(vec2((fract(vUv.x * len * 0.5) - 0.5) * 2.4, y * 3.2)));   // 纸带中间一串小镂空
+        if (hole > 0.5 && y < 0.3) discard;
+        float rim = smoothstep(edgeLimit - 0.22, edgeLimit, y);
+        float tail = smoothstep(0.0, 0.35, vUv.x);                    // 尾巴烧成光
+        vec3 red = vec3(0.55, 0.006, 0.01);
+        vec3 c = mix(vec3(1.0,0.55,0.18) * 2.2, red, tail);
+        c = mix(c, vec3(1.0, 0.62, 0.22) * 1.25, rim * 0.85);
+        gl_FragColor = vec4(c, fade * (0.5 + 0.5 * tail));
+      }`
+  });
+  return new THREE.Mesh(g, mat);
+}
+
+// 光线（细长加色条）
+function streaks(list) {   // [{a:Vector3, b:Vector3, w, c}]
+  const pos = [], col = [], uv = [];
+  for (const s of list) {
+    const d = new THREE.Vector3().subVectors(s.b, s.a), side = new THREE.Vector3().crossVectors(d, s.n || new THREE.Vector3(0, 0, 1)).normalize().multiplyScalar(s.w);
+    const A = s.a.clone().add(side), B = s.a.clone().sub(side), C = s.b.clone().add(side), D = s.b.clone().sub(side);
+    for (const [p, u] of [[A, [0, 1]], [B, [0, 0]], [C, [1, 1]], [B, [0, 0]], [D, [1, 0]], [C, [1, 1]]]) { pos.push(p.x, p.y, p.z); uv.push(...u); col.push(s.c.r, s.c.g, s.c.b); }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  return new THREE.Mesh(g, new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, vertexColors: true, side: THREE.DoubleSide,
+    vertexShader: `varying vec2 vUv; varying vec3 vC; void main(){ vUv = uv; vC = color; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.); }`,
+    fragmentShader: `varying vec2 vUv; varying vec3 vC; void main(){ float a = sin(3.14159 * vUv.x) * pow(1. - abs(vUv.y - .5) * 2., 1.5); gl_FragColor = vec4(vC * a, a); }`
+  }));
+}
+
+// 金线圆环（法阵）
+function ringLine(r, w, color, dashed = 0) {
+  const g = new THREE.RingGeometry(r - w, r + w, 256, 1);
+  const m = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    uniforms: { c: { value: new THREE.Color(color) }, dash: { value: dashed } },
+    vertexShader: `varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.); }`,
+    fragmentShader: `uniform vec3 c; uniform float dash; varying vec3 vP;
+      void main(){ float an = atan(vP.y, vP.x); float d = dash > 0. ? step(0.5, fract(an / 6.28318 * dash)) : 1.; if (d < .5) discard; gl_FragColor = vec4(c, 1.); }`
+  });
+  return new THREE.Mesh(g, m);
+}
+
+// =============================================================
+//  五个招式
+// =============================================================
+const S = 1000;                                        // 团花的世界尺寸
+const gold = new THREE.Color(1.0, 0.62, 0.25);
+
+function stage2() {                                    // 缠绕：红纸带绕着拳头螺旋往上卷
+  camera.position.set(0, 60, 1500); camera.lookAt(0, 60, 0);
+  const center = new THREE.Vector3(0, -40, 0);
+  { const g = glow(620, 0.7); g.position.copy(center); scene.add(g); }
+  { const g = glow(170, 1.8); g.position.copy(center); scene.add(g); }
+  // 握在拳心里的那一小角纸（折起来的团花：一个窄扇形）
+  const folded = flower(300, { wipe: 1 / 12, heat: 1.6 }); folded.position.copy(center); folded.rotation.z = Math.PI / 12; scene.add(folded);
+  const NR = 7;
+  for (let k = 0; k < NR; k++) {
+    const pts = [], a0 = k / NR * Math.PI * 2, turns = 1.4 + rnd() * 0.5, h0 = -380 + rnd() * 80, h1 = 360 + rnd() * 260;
+    const sp = PROG;                                      // 蓄力越久卷得越高越紧
+    for (let i = 0; i < 90; i++) {
+      const s = i / 89, a = a0 + s * turns * Math.PI * 2 * (0.6 + sp);
+      const rad = (230 - 120 * sp) * (0.55 + 0.6 * Math.sin(Math.PI * s)) + 30;
+      pts.push(new THREE.Vector3(Math.cos(a) * rad, center.y + h0 + (h1 - h0) * s * (0.5 + sp * 0.6), Math.sin(a) * rad));
+    }
+    scene.add(ribbon(pts.reverse(), 16 + rnd() * 12, { len: 70, twist: 1.2 }));
+  }
+  scene.add(embers(900, () => { const a = rnd() * 6.28, r = 120 + rnd() * 380; return [Math.cos(a) * r, -350 + rnd() * 1000, Math.sin(a) * r]; }, 9, 1.6));
+}
+
+function stage3() {                                    // 冲天：张开的一瞬间，光柱炸开，画面被往里吸
+  camera.position.set(0, 0, 900); camera.lookAt(0, 0, 0);
+  scene.add(glow(1500, 0.45)); scene.add(glow(420, 1.0)); scene.add(glow(150, 2.2));
+  const f = flower(400, { wipe: 0.35 + 0.65 * PROG, heat: 1.8 }); f.position.z = 10; scene.add(f);   // 团花正在甩开
+  const L = [];
+  for (let i = 0; i < 520; i++) {                       // 隧道光线：从中心冲向镜头
+    const a = rnd() * Math.PI * 2, r = 90 + Math.pow(rnd(), 0.6) * 900, z0 = -2400 + rnd() * 2200, len = 300 + rnd() * 1300;
+    const c = new THREE.Color().setHSL(0.05 + rnd() * 0.07, 1, 0.5 + rnd() * 0.2).multiplyScalar(0.6 + rnd() * 1.6);
+    const dir = new THREE.Vector3(Math.cos(a), Math.sin(a), 0);
+    L.push({ a: dir.clone().multiplyScalar(r).setZ(z0), b: dir.clone().multiplyScalar(r * 1.35).setZ(z0 + len), w: 1.2 + rnd() * 3.5, c, n: dir.clone().cross(new THREE.Vector3(0, 0, 1)) });
+  }
+  scene.add(streaks(L));
+  const R2 = [];
+  for (let i = 0; i < 90; i++) {                        // 放射光刺
+    const a = rnd() * Math.PI * 2, d = new THREE.Vector3(Math.cos(a), Math.sin(a), 0), l = 200 + rnd() * 900;
+    R2.push({ a: d.clone().multiplyScalar(60), b: d.clone().multiplyScalar(60 + l), w: 0.8 + rnd() * 2, c: gold.clone().multiplyScalar(0.7 + rnd() * 1.2) });
+  }
+  scene.add(streaks(R2));
+  // 甩飞出去的纸片
+  const L3 = [];
+  for (let i = 0; i < 700; i++) { const a = rnd() * 6.28, r = 220 + rnd() * 700; L3.push({ x: Math.cos(a) * r, y: Math.sin(a) * r, z: rnd() * 500 - 200, rx: rnd() * 6, ry: rnd() * 6, rz: rnd() * 6, s: 6 + rnd() * 16, heat: rnd() }); }
+  scene.add(shards(L3));
+  scene.add(embers(2500, () => { const a = rnd() * 6.28, r = 50 + rnd() * 900; return [Math.cos(a) * r, Math.sin(a) * r, rnd() * 600 - 300]; }, 7, 2.2));
+}
+
+function ringScene(done, partial, link) {
+  camera.position.set(0, 1650, 1550); camera.lookAt(0, -80, 0);
+  const G = new THREE.Group(); G.rotation.x = -Math.PI / 2; scene.add(G);
+  const RR = 360, NS = 8;
+  G.add(ringLine(RR + 190, 2.2, gold.clone().multiplyScalar(2.2)));
+  G.add(ringLine(RR + 172, 1.4, gold.clone().multiplyScalar(1.6), 180));
+  G.add(ringLine(RR - 150, 1.6, gold.clone().multiplyScalar(1.6)));
+  for (let k = 0; k < NS; k++) {
+    const a = -Math.PI / 2 + k / NS * Math.PI * 2, x = Math.cos(a) * RR, y = Math.sin(a) * RR;
+    const st = k < done ? 1 : k === done ? partial : 0;
+    const g2 = new THREE.Group(); g2.position.set(x, y, 0); G.add(g2);
+    g2.add(ringLine(118, 1.6, gold.clone().multiplyScalar(st > 0 ? 2.6 : 0.5)));
+    g2.add(ringLine(104, 1.0, gold.clone().multiplyScalar(st > 0 ? 1.8 : 0.3), 64));
+    if (st > 0) {
+      const f = flower(200, { wipe: st, heat: 2.0 }); f.rotation.z = a + Math.PI / 2; f.position.z = 2; g2.add(f);
+      const gl = glow(360, st < 1 ? 1.0 : 0.35); gl.position.set(x, 2, -y); scene.add(gl);
+    }
+    if (k === done && partial > 0) {                   // 刚落下的那一枚：光柱
+      const beam = streaks([{ a: new THREE.Vector3(x, 0, -y), b: new THREE.Vector3(x, 1400, -y), w: 46, c: gold.clone().multiplyScalar(1.6), n: new THREE.Vector3(0, 0, 1) }]);
+      scene.add(beam);
+      scene.add(embers(500, () => { const r = rnd() * 140, an = rnd() * 6.28; return [x + Math.cos(an) * r, rnd() * 700, -y + Math.sin(an) * r]; }, 10, 3));
+    }
+  }
+  if (link) {                                          // 汇聚：金线连成八角星，花心炸开
+    const L = [], P3 = k => { const a = -Math.PI / 2 + k / NS * Math.PI * 2; return new THREE.Vector3(Math.cos(a) * RR, 3, -Math.sin(a) * RR); };
+    for (let k = 0; k < NS; k++) {
+      L.push({ a: P3(k), b: P3((k + 3) % NS), w: 3, c: gold.clone().multiplyScalar(2.2), n: new THREE.Vector3(0, 1, 0) });
+      L.push({ a: P3(k), b: new THREE.Vector3(0, 3, 0), w: 2, c: gold.clone().multiplyScalar(1.5), n: new THREE.Vector3(0, 1, 0) });
+    }
+    scene.add(streaks(L));
+    const c0 = glow(1000, 0.8); c0.position.y = 40; scene.add(c0);
+    const c1 = glow(240, 2.0); c1.position.y = 40; scene.add(c1);
+    const R2 = [];
+    for (let i = 0; i < 110; i++) { const d = new THREE.Vector3(rnd() - 0.5, rnd() * 0.9, rnd() - 0.5).normalize(), l = 300 + rnd() * 1200; R2.push({ a: d.clone().multiplyScalar(40).setY(40), b: d.clone().multiplyScalar(40 + l).setY(40 + d.y * l), w: 1 + rnd() * 2.5, c: gold.clone().multiplyScalar(0.6 + rnd() * 1.2), n: new THREE.Vector3(0, 0, 1) }); }
+    scene.add(streaks(R2));
+    scene.add(embers(3000, () => { const a = rnd() * 6.28, r = rnd() * 900; return [Math.cos(a) * r, rnd() * 500, Math.sin(a) * r]; }, 8, 2.6));
+  } else scene.add(embers(1200, () => { const a = rnd() * 6.28, r = rnd() * 700; return [Math.cos(a) * r, rnd() * 300, Math.sin(a) * r]; }, 7, 1.8));
+}
+const stage4 = () => ringScene(Math.floor(PROG * 8), PROG * 8 % 1 || 0.6, false);
+const stage5 = () => ringScene(8, 1, true);
+
+function stage6() {                                    // 显形：漫天纸屑旋成涡，从花心往外拼回一整朵大团花
+  camera.position.set(0, -260, 1900); camera.lookAt(0, 0, 0);
+  const SZ = 1050, P = PROG;
+  const reveal = clamp((P - 0.15) / 0.75) * 1.02;
+  scene.add(flower(SZ, { reveal, heat: 1.6 }));
+  // 纸屑：从团花上按位置取样，每一片都知道自己该回到哪
+  const L = [], TR = [];
+  for (let i = 0; i < 30000 && L.length < 11000; i++) {
+    const u = rnd(), v = rnd(); if (!paperAt(u, v)) continue;
+    const tx = (u - 0.5) * SZ, ty = (0.5 - v) * SZ, tr = Math.hypot(tx, ty) / (SZ / 2), rt = tr * SZ / 2;
+    if (tr < reveal - 0.01) continue;                    // 已经拼好的
+    const d = tr * 0.75 + rnd() * 0.2;                   // 里面的先回来
+    const k = ease(clamp((P - d * 0.75) / 0.45));        // 这一片回来了多少
+    const ta = Math.atan2(ty, tx), far = (1 - k) * (250 + 1000 * Math.pow(rnd(), 1.3));
+    const arm = Math.floor(rnd() * 3) * Math.PI * 2 / 3, aw = Math.atan2(Math.sin(ta - arm), Math.cos(ta - arm));
+    const rr = rt + far, a = ta - aw * clamp(far / 700) * 0.85 + far / 380 + (rnd() - 0.5) * 0.25;     // 旋涡：越远越往三条旋臂上收，转得越多
+    const z = (1 - k) * (-250 + rnd() * 450);
+    const heat = (1 - k) * 0.9 + (tr - reveal < 0.06 ? 0.7 : 0);
+    const sc = (5 + rnd() * 9) * (1 + (1 - k) * 0.9) * (z > 400 ? 1.8 : 1);
+    L.push({ x: Math.cos(a) * rr, y: Math.sin(a) * rr * 0.86, z, rx: rnd() * 6 * (1 - k), ry: rnd() * 6 * (1 - k), rz: rnd() * 6, s: sc, heat });
+    if (k < 0.95 && rnd() < 0.16) {                      // 拖尾：顺着旋涡往回画一小段
+      const seg = 6, span = 0.08 + 0.5 * (1 - k);
+      for (let q = 0; q < seg; q++) {
+        const a1 = a - span * q / seg, a2 = a - span * (q + 1) / seg, r1 = rr + 60 * (1 - k) * q / seg, r2 = rr + 60 * (1 - k) * (q + 1) / seg;
+        TR.push({ a: new THREE.Vector3(Math.cos(a1) * r1, Math.sin(a1) * r1 * 0.86, z), b: new THREE.Vector3(Math.cos(a2) * r2, Math.sin(a2) * r2 * 0.86, z), w: 1.6 + sc * 0.1, c: new THREE.Color(1, 0.4, 0.08).multiplyScalar(0.9 * (1 - q / seg) * (0.2 + heat)) });
+      }
+    }
+  }
+  scene.add(streaks(TR));
+  scene.add(shards(L));
+  // 风的轨迹：金色弧线
+  const T = [];
+  for (let j = 0; j < 46; j++) {
+    const r = 500 + rnd() * 900, a0 = rnd() * 6.28, span = 0.4 + rnd() * 0.9, z = -500 + rnd() * 900, seg = 12;
+    for (let s = 0; s < seg; s++) {
+      const a1 = a0 + span * s / seg, a2 = a0 + span * (s + 1) / seg;
+      T.push({ a: new THREE.Vector3(Math.cos(a1) * r, Math.sin(a1) * r * 0.85, z), b: new THREE.Vector3(Math.cos(a2) * r, Math.sin(a2) * r * 0.85, z), w: 1.4, c: gold.clone().multiplyScalar(0.5 + 1.6 * s / seg) });
+    }
+  }
+  scene.add(streaks(T));
+  const fr = ringLine(reveal * SZ / 2, 1.5, gold.clone().multiplyScalar(1.2)); scene.add(fr);   // 拼接的前沿
+  scene.add(embers(1500, () => { const arm = Math.floor(rnd() * 3) * 2.094, r = 400 + rnd() * 1500; const a = arm + r / 380 + (rnd() - 0.5) * 0.6; return [Math.cos(a) * r, Math.sin(a) * r * 0.86, -300 + rnd() * 500]; }, 9, 2.4));
+}
+
+({ 2: stage2, 3: stage3, 4: stage4, 5: stage5, 6: stage6 })[STAGE]();
+
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+composer.addPass(new UnrealBloomPass(new THREE.Vector2(W, H), 0.75, 0.45, 0.9));
+composer.addPass(new OutputPass());
+composer.render();
+window.__done = true;
+</script>
+</body>
+</html>
