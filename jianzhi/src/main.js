@@ -130,7 +130,7 @@ async function buildParticles() {
     for (const list of [paper, lights]) for (const q of list) {
       const th = k * WEDGE + (k % 2 ? WEDGE - q.phi : q.phi);
       SR[i] = q.r; SA[i] = th; SX[i] = Math.sin(th) * q.r / 2; SY[i] = Math.cos(th) * q.r / 2;
-      LAY[i] = layerOf(q.r); GRP[i] = i % 6; R1[i] = rnd(); R2[i] = rnd(); R3[i] = rnd(); SPD[i] = 2.0 + rnd() * 2.4;
+      LAY[i] = layerOf(q.r); GRP[i] = i % 6; R1[i] = rnd(); R2[i] = rnd(); R3[i] = rnd(); SPD[i] = 3.2;   // 所有点同一个速度：整体干净地移动，不散、不拖影
       if (list === paper) { LIGHT[i] = 0; COL.set(q.c ? RED2 : RED, i * 3); SIZE[i] = q.sz * K; BASEA[i] = q.c ? 0.55 : 0.62; }
       else { LIGHT[i] = 1; COL.set(q.lime ? LIME : CYAN, i * 3); SIZE[i] = 1.6 * K; BASEA[i] = 0.75; }
       i++;
@@ -259,7 +259,7 @@ function handPoint(i) {
 // =============================================================
 const tmp = [0, 0, 0];
 function physics(dt, T) {
-  const fast = S.mode === 'BURST' ? 1.8 : S.mode === 'CHARGE' ? 1.4 : S.mode === 'SEAL' ? 1.0 : S.mode === 'REVEAL' ? 0.6 : 0.8;
+  const fast = S.mode === 'BURST' || S.mode === 'CHARGE' ? 3.0 : 1.0;   // 展开时紧跟扇面，像一张纸整体打开
   const ka = 1 - Math.exp(-3 * dt);
   for (let i = 0; i < N; i++) {
     const a = target(i, tmp, T), k = 1 - Math.exp(-SPD[i] * fast * dt), j = i * 3;
