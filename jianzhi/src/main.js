@@ -32,7 +32,7 @@ const CFG = {
   MIN_PALM: 0.07,       // 手掌（手腕到中指根）至少占画面高度多少，太远的手不算
 };
 const Q = new URLSearchParams(location.search);
-const LOOK = { d: +(Q.get('d') || 1), sz: +(Q.get('sz') || 1), soft: +(Q.get('soft') || 0) };
+const LOOK = { d: +(Q.get('d') || 1.8), sz: +(Q.get('sz') || 0.76), soft: +(Q.get('soft') || 0.45) };   // 远看是一朵完整的团花，近看是一颗颗数字粒子
 const NB = Math.round(1080 * LOOK.d), NL = 95, N = 16 * (NB + NL);          // 原版：1/16 扇形里 620 个纸点 + 70 个镂空光点，折 16 次
 const ASPECT = 848 / 600;
 const SZ = 730, SEAL = 200, RR = 260, NS = 5, CAMZ = 2000, FOV = 38;
