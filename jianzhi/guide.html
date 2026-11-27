@@ -56,7 +56,7 @@ const STEPS = [
   ['01', '举起手', '五指张开，粒子沿着手掌亮起', hand(open)],
   ['02', '握拳', '握住不动，粒子绕拳心蓄力', hand(fist)],
   ['03', '猛地张开', '团花一扇一扇甩开', hand(fist, { op: 0.22, dx: -6, dy: 8 }) + hand(open) + `<g stroke="#d6b07a" stroke-width="2.4" stroke-linecap="round" opacity="0.6">${rays}</g>`],
-  ['04', '伸手指 1 → 5', '伸一根手指，落一枚小团花', hand(pose([0,1,1,0,0])) + `<text x="40" y="58" fill="#d6b07a" font-size="34" font-family="Noto Serif SC, serif">1 → 5</text>`],
+  ['04', '竖起一根手指', '保持住，小团花一朵朵出现', hand(pose([0,1,0,0,0]))],
   ['05', '捏住', '拇指捏住食指，五枚连成一朵', hand(pose([1,1,1,1,1], true))],
   ['06', '转手腕 · 松开', '捏着转出旋涡，松手聚成大团花', hand(pose([1,1,1,1,1], true), { rot: -20 }) + `<path d="M75 130 A170 170 0 0 1 320 120" fill="none" stroke="#d6b07a" stroke-width="2.4" opacity="0.7"/><path d="M322 104 L332 128 L306 126 Z" fill="#d6b07a" opacity="0.7"/>`],
 ];

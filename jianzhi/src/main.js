@@ -7,7 +7,7 @@
 //    01 举起手          粒子沿着手掌亮起
 //    02 握拳            折起来的团花在拳心蓄力，几层粒子在各自平面里旋进去
 //    03 猛地张开        团花一扇一扇甩开
-//    04 伸手指 1→5      每多伸一根，一朵小团花从深处飞来落位
+//    04 竖起一根手指    保持住，小团花一朵接一朵慢慢出现
 //    05 捏住            五朵往中心收，一层层往后退，叠成一摞
 //    06 捏着转手腕→松开  大团花五圈从深处一圈圈往前来；松手全部到位
 //    07 定格            五圈前后轻轻错开，慢慢呼吸
@@ -352,8 +352,11 @@ function interact(h, dt) {
     if (h.fist) S.charge = Math.min(1, S.charge + dt / 2.2);
     if (h.open) { if (S.charge > 0.12) { setMode('BURST'); S.open = 0; progress(); } else setMode('AWAKE'); }
   } else if (m === 'BLOOM' || m === 'SEAL') {
-    const want = S.seals + 1;
-    if (want <= NS && held('n' + want, 0.25)) { S.seals = want; S.sealT[want - 1] = 0; setMode('SEAL'); progress(); }
+    // 04 结印：竖起一根手指并保持住，小团花一朵接一朵慢慢出现（每 0.8 秒一朵）；放下手指就停在那里
+    if (held('n1', 0.2) && S.seals < NS) {
+      G.sealClock = (G.sealClock || 0) + dt;
+      if (S.seals === 0 || G.sealClock >= 0.8) { G.sealClock = 0; S.seals++; S.sealT[S.seals - 1] = 0; setMode('SEAL'); progress(); }
+    } else G.sealClock = 0.8;
     if (S.seals >= 1 && held('pinch', 0.2)) {           // 宽容：没伸满五根也能直接捏
       S.seals = NS; setMode('GATHER'); S.gather = 0; S.twist = 0; G.lastRoll = h.roll; progress();
     }
@@ -387,7 +390,7 @@ function reset() { S.charge = 0; S.open = 0; S.seals = 0; S.gather = 0; S.reveal
 // 自动演示的分镜（秒）
 const DEMO = [
   [0, 'WAIT', ''], [2.5, 'AWAKE', '举起手'], [5, 'CHARGE', '握拳'], [7.6, 'BURST', '猛地张开'], [9.4, 'BLOOM', ''],
-  [10.6, 'SEAL1', '伸一根手指'], [11.8, 'SEAL2', '两根'], [13, 'SEAL3', '三根'], [14.2, 'SEAL4', '四根'], [15.4, 'SEAL5', '五根'],
+  [10.6, 'SEAL1', '竖起一根手指'], [11.4, 'SEAL2', '竖起一根手指'], [12.2, 'SEAL3', '竖起一根手指'], [13, 'SEAL4', '竖起一根手指'], [13.8, 'SEAL5', '竖起一根手指'],
   [17, 'GATHER', '捏住'], [19.4, 'REVEAL', '捏着转手腕，再松开'], [23.5, 'HOLD', ''], [31, 'END', '握拳，折回去'],
 ];
 const DEMO_LEN = 33;
@@ -416,11 +419,11 @@ const HAND0 = [[0,0],[-45,40],[-85,90],[-115,135],[-140,175],[-45,170],[-55,240]
 function ghostHand() { const k = 1.15; S.handScale = k; return HAND0.map(p => [p[0] * k + 30, p[1] * k - 260, 0]); }
 
 const HINTS = {
-  WAIT: '举起手，再握拳', AWAKE: '握拳，握住', BURST: '', BLOOM: '伸一根手指', GATHER: '捏着，转一转手腕', REVEAL: '松开', HOLD: '握拳，重新开始',
+  WAIT: '举起手，再握拳', AWAKE: '握拳，握住', BURST: '', BLOOM: '竖起一根手指，保持住', GATHER: '捏着，转一转手腕', REVEAL: '松开', HOLD: '握拳，重新开始',
 };
 function hintFor() {
   if (S.mode === 'CHARGE') return S.charge < 0.35 ? '握住……' : '猛地张开';
-  if (S.mode === 'SEAL') return S.seals < NS ? `伸 ${S.seals + 1} 根手指` : '拇指捏住食指';
+  if (S.mode === 'SEAL') return S.seals < NS ? '保持一根手指……' : '拇指捏住食指';
   return HINTS[S.mode] || '';
 }
 
