@@ -2,35 +2,59 @@
 <html lang="zh">
 <head>
 <meta charset="utf-8">
-<title>掌中展开 · 手势指引</title>
+<title>数字剪纸 · 手势指引</title>
 <style>
   @page { size: 210mm 297mm; margin: 0; }
-  :root { --bg: #0c0a0b; --ink: #efe6da; --dim: #9c8f80; --gold: #d6b07a; --red: #e2463c; }
-  html, body { margin: 0; background: var(--bg); }
-  .card { width: 210mm; height: 297mm; box-sizing: border-box; padding: 22mm 20mm 18mm; color: var(--ink);
-    font-family: "Noto Sans SC", "WenQuanYi Zen Hei", sans-serif; font-weight: 300; display: flex; flex-direction: column; }
-  .eyebrow { font-size: 8.5pt; letter-spacing: 0.32em; color: var(--dim); }
-  h1 { font-family: "Noto Serif SC", serif; font-weight: 600; font-size: 34pt; letter-spacing: 0.12em; margin: 5mm 0 2mm; }
-  .lead { font-size: 11pt; color: var(--dim); letter-spacing: 0.08em; }
-  .rule { height: 0.3mm; background: linear-gradient(90deg, var(--gold), transparent); opacity: 0.6; margin: 9mm 0 7mm; }
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6mm 8mm; flex: 1; align-content: space-evenly; }
-  .step { display: flex; gap: 3mm; align-items: center; }
-  .step svg { width: 36mm; height: 36mm; flex: none; margin-left: -4mm; }
-  .no { font-family: "Noto Serif SC", serif; font-size: 9pt; color: var(--gold); letter-spacing: 0.2em; }
-  .g { font-family: "Noto Serif SC", serif; font-weight: 600; font-size: 15pt; letter-spacing: 0.06em; margin: 1.2mm 0 1.6mm; }
-  .e { font-size: 9pt; color: var(--dim); line-height: 1.6; white-space: nowrap; }
-  .foot { display: flex; justify-content: space-between; align-items: flex-end; font-size: 8.5pt; color: var(--dim); letter-spacing: 0.12em; margin-top: 8mm; }
-  .foot b { font-weight: 400; color: var(--ink); }
+  html, body { margin: 0; background: rgb(6,6,9); }
+  .card { position: relative; width: 210mm; height: 297mm; box-sizing: border-box; padding: 11mm 11mm 10mm; color: #f0f0f0; overflow: hidden;
+    background-color: rgb(6,6,9);
+    background-image: linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px);
+    background-size: 8.75mm 8.75mm; }
+  .mono { font-family: Consolas, "Courier New", "DejaVu Sans Mono", monospace; }
+  .cn { font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", "WenQuanYi Zen Hei", sans-serif; }
+  .top { display: flex; justify-content: space-between; font-size: 7.5pt; color: rgba(255,255,255,.59); padding-bottom: 3mm; border-bottom: .3mm solid rgba(255,255,255,.35); }
+  .head { display: flex; justify-content: space-between; align-items: flex-start; margin-top: 7mm; }
+  h1 { margin: 0; font-size: 30pt; font-weight: 700; letter-spacing: .02em; -webkit-text-stroke: .9px #f0f0f0; }
+  .sub, .step .g, .badge .a, .badge .b { -webkit-text-stroke: .35px currentColor; }
+  .sub { margin-top: 2.5mm; font-size: 13pt; font-weight: 700; color: #b6ff3c; }
+  .lead { margin-top: 3mm; font-size: 8.5pt; color: rgba(255,255,255,.5); }
+  .badge { width: 58mm; }
+  .badge .a { background: #b6ff3c; color: rgb(6,6,9); font-weight: 700; font-size: 12pt; padding: 2.2mm 3.5mm; }
+  .badge .b { background: rgb(230,40,50); color: #fff; font-weight: 700; font-size: 8pt; padding: 1.4mm 3.5mm; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; margin-top: 8mm; border-top: .3mm solid rgba(255,255,255,.2); border-left: .3mm solid rgba(255,255,255,.2); }
+  .step { border-right: .3mm solid rgba(255,255,255,.2); border-bottom: .3mm solid rgba(255,255,255,.2); padding: 5mm 5mm 7mm; }
+  .step .no { font-size: 7.5pt; color: #b6ff3c; letter-spacing: .1em; }
+  .step svg { display: block; width: 50mm; height: 50mm; margin: 2mm auto 3mm; }
+  .step .g { font-size: 13pt; font-weight: 700; }
+  .step .e { margin-top: 1.5mm; font-size: 8.5pt; line-height: 1.55; color: rgba(255,255,255,.62); }
+  .bottom { position: absolute; left: 11mm; right: 11mm; bottom: 10mm; display: flex; justify-content: space-between; align-items: flex-end; border-top: .3mm solid rgba(255,255,255,.35); padding-top: 5mm; }
+  .tips .k { font-size: 7.5pt; color: rgba(255,255,255,.5); }
+  .tips .v { margin-top: 2mm; font-size: 10pt; line-height: 1.75; color: rgba(255,255,255,.8); }
+  .tips .v b { color: #b6ff3c; font-weight: 700; }
+  .tips .red { margin-top: 3mm; font-size: 9pt; color: rgb(255,120,120); }
+  .qr { text-align: right; }
+  .qr .k { font-size: 7.5pt; color: rgba(255,255,255,.5); margin-bottom: 2mm; }
+  .qr svg { width: 38mm; height: 38mm; display: block; margin-left: auto; }
+  .qr .u { margin-top: 2mm; font-size: 6.5pt; color: rgba(255,255,255,.4); }
 </style>
 </head>
 <body>
 <div class="card">
-  <div class="eyebrow">HOW TO PLAY · 手势指引</div>
-  <h1>掌中展开</h1>
-  <div class="lead">把一只手举到镜头前，跟着做下去</div>
-  <div class="rule"></div>
-  <div class="grid" id="grid"></div>
-  <div class="foot"><div><b>无人时自动演示</b>　举起手即可接管<br>再握一次拳，回到开始</div><div>数字剪纸 · 非遗新生计划</div></div>
+  <div class="top mono"><span>INTANGIBLE CULTURAL HERITAGE / NEW MEDIA</span><span>HOW TO PLAY — 001</span></div>
+  <div class="head">
+    <div><h1 class="cn">{ 数字剪纸 }</h1><div class="sub cn">手势指引 · 用一只手展开一朵团花</div>
+      <div class="lead mono">→ 把一只手举到镜头前，离镜头一臂左右，跟着做下去</div></div>
+    <div class="badge"><div class="a mono">PAPER-CUT</div><div class="b cn">佛山剪纸 · 国家级非遗</div></div>
+  </div>
+  <div class="grid cn" id="grid"></div>
+  <div class="bottom">
+    <div class="tips">
+      <div class="k mono">NOTE / 说明</div>
+      <div class="v cn">无人时自动演示，<b>举起手</b>即可接管<br>一套动作：<b>剪 → 展 → 印 → 聚 → 显</b><br>任何时候<b>握拳停住</b>，折回去重新开始</div>
+      <div class="red cn">握紧的，是一张纸；张开的，是一门手艺。</div>
+    </div>
+    <div class="qr"><div class="k mono">SCAN / 扫码体验</div><div id="qrbox"></div><div class="u mono">ynian0355-cell.github.io/posters/jianzhi</div></div>
+  </div>
 </div>
 <script>
 // 手的 21 个关键点（MediaPipe 编号），张开的手
@@ -48,20 +72,20 @@ function hand(P, o = {}) {
   const t = `translate(${200 + (o.dx || 0)} ${330 + (o.dy || 0)}) rotate(${o.rot || 0}) scale(0.8 -0.8) translate(20 0)`;
   const lines = BONES.map(([a, b]) => `<line x1="${P[a][0]}" y1="${P[a][1]}" x2="${P[b][0]}" y2="${P[b][1]}"/>`).join('');
   const dots = P.map(p => `<circle cx="${p[0]}" cy="${p[1]}" r="${[4,8,12,16,20].some(k => P[k] === p) ? 6 : 4.5}"/>`).join('');
-  return `<g transform="${t}" opacity="${o.op ?? 1}"><g stroke="#d6b07a" stroke-width="2.4" stroke-linecap="round" opacity="0.75">${lines}</g><g fill="#e2463c">${dots}</g></g>`;
+  return `<g transform="${t}" opacity="${o.op ?? 1}"><g stroke="#ffffff" stroke-opacity="0.55" stroke-width="2.4" stroke-linecap="round">${lines}</g><g fill="#f03a44">${dots}</g></g>`;
 }
 const open = pose([1,1,1,1,1]), fist = pose([0,0,0,0,0]);
 const rays = Array.from({ length: 7 }, (_, i) => { const a = -Math.PI / 2 + (i - 3) * 0.36; return `<line x1="${200 + Math.cos(a) * 168}" y1="${232 + Math.sin(a) * 168}" x2="${200 + Math.cos(a) * 190}" y2="${232 + Math.sin(a) * 190}"/>`; }).join('');
 const STEPS = [
-  ['01', '举起手', '五指张开，粒子沿着手掌亮起', hand(open)],
-  ['02', '握拳', '握住不动，粒子绕拳心蓄力', hand(fist)],
-  ['03', '猛地张开', '团花一扇一扇甩开', hand(fist, { op: 0.22, dx: -6, dy: 8 }) + hand(open) + `<g stroke="#d6b07a" stroke-width="2.4" stroke-linecap="round" opacity="0.6">${rays}</g>`],
-  ['04', '竖起一根手指', '保持住，小团花一朵朵出现', hand(pose([0,1,0,0,0]))],
-  ['05', '捏住', '拇指捏住食指，五枚连成一朵', hand(pose([1,1,1,1,1], true))],
-  ['06', '转手腕 · 松开', '捏着转出旋涡，松手聚成大团花', hand(pose([1,1,1,1,1], true), { rot: -20 }) + `<path d="M75 130 A170 170 0 0 1 320 120" fill="none" stroke="#d6b07a" stroke-width="2.4" opacity="0.7"/><path d="M322 104 L332 128 L306 126 Z" fill="#d6b07a" opacity="0.7"/>`],
+  ['01', '握拳', '剪 —— 小三角从尖角往上长出来', hand(fist)],
+  ['02', '猛地张开', '展 —— 一下打开成整朵团花', hand(fist, { op: 0.22, dx: -6, dy: 8 }) + hand(open) + `<g stroke="#b6ff3c" stroke-width="3" stroke-linecap="round" opacity="0.9">${rays}</g>`],
+  ['03', '竖起一根手指', '印 —— 保持住，五朵小团花依次冒出', hand(pose([0,1,0,0,0]))],
+  ['04', '拇指捏住食指', '聚 —— 五朵往中间集结，合成一朵', hand(pose([1,1,1,1,1], true))],
+  ['05', '转手腕，再松开', '显 —— 流回一整朵大团花', hand(pose([1,1,1,1,1], true), { rot: -20 }) + `<path d="M75 130 A170 170 0 0 1 320 120" fill="none" stroke="#b6ff3c" stroke-width="3" opacity="0.9"/><path d="M322 104 L332 128 L306 126 Z" fill="#b6ff3c" opacity="0.9"/>`],
+  ['06', '再握拳', '折 —— 收回一个角，重新开始', hand(fist)],
 ];
 document.getElementById('grid').innerHTML = STEPS.map(([n, g, e, svg]) =>
-  `<div class="step"><svg viewBox="0 0 400 400">${svg}</svg><div><div class="no">${n}</div><div class="g">${g}</div><div class="e">${e}</div></div></div>`).join('');
+  `<div class="step"><div class="no">STEP ${n}</div><svg viewBox="0 0 400 400">${svg}</svg><div class="g">${g}</div><div class="e">${e}</div></div>`).join('');
 </script>
 </body>
 </html>
