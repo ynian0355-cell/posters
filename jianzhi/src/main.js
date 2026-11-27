@@ -60,6 +60,7 @@ camera.position.set(0, 0, CAMZ);
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
 const bloom = new UnrealBloomPass(new THREE.Vector2(600, 848), 0.35, 0.7, 0.55);
+composer.addPass(bloom);
 composer.addPass(new OutputPass());
 let PX_H = 848;
 function fit() {
@@ -134,9 +135,9 @@ function makePoints() {
     uniforms: { k: { value: PX_H / 1000 } },
     vertexShader: `attribute float size, alpha; attribute vec3 color; uniform float k; varying vec3 vC; varying float vA;
       void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.); gl_Position = projectionMatrix * mv;
-        float ps = size * 0.85 * k * 1500. / -mv.z; gl_PointSize = max(ps, 1.0); vC = color; vA = alpha * min(1., ps * ps); }`,
+        float ps = size * k * 1500. / -mv.z; gl_PointSize = max(ps, 1.0); vC = color; vA = alpha * min(1., ps * ps); }`,
     fragmentShader: `varying vec3 vC; varying float vA;
-      void main(){ float d = length(gl_PointCoord - .5) * 2.; float a = smoothstep(1.0, 0.55, d) * vA * 2.0; if (a < 0.003) discard; gl_FragColor = vec4(vC, a); }`
+      void main(){ float d = length(gl_PointCoord - .5) * 2.; float a = exp(-d * d * 3.5) * vA * 2.6; if (a < 0.003) discard; gl_FragColor = vec4(vC, a); }`
   });
   points = new THREE.Points(g, pmat); points.frustumCulled = false; scene.add(points);
   // 手的 21 个关键点：一直淡淡地跟着你的手，让人知道"它看见我了"
@@ -179,48 +180,52 @@ function target(i, out, T) {
     if (false) {        // 01 觉醒：四分之一的粒子去描你的手
       const hp = handPoint(i); if (hp) { x = hp[0]; y = hp[1]; z = hp[2]; a = BASEA[i] * 0.9; }
     }
-  } else if (m === 'CHARGE') {                           // 02 蓄力：四层平面旋涡，往拳心旋
-    const c = S.charge, layer = Math.floor(R2[i] * 4), zs = [-700, -260, 0, 260][layer];
-    const arm = Math.floor(R3[i] * 5) / 5 * Math.PI * 2 + layer * 0.7;
-    const s = (R1[i] - 0.18) / 0.82, ang = arm + s * 3.2 * (0.6 + 0.8 * c) + T * (0.15 + 0.4 * c);
-    const rad = 60 + (1 - s) * (440 - 140 * c) + (R2[i] - 0.5) * 18;
-    x = Math.cos(ang) * rad; y = Math.sin(ang) * rad; z = zs;
-    a = BASEA[i] * 0.8 * (0.25 + 0.75 * clamp((1 - s) / 0.45)) * (0.5 + 0.5 * c) * [0.55, 0.8, 1, 0.7][layer];
+  } else if (m === 'CHARGE') {                           // 02 蓄力：六条粒子带绕着拳心螺旋往上卷（和分镜图一样）
+    const c = S.charge, k6 = Math.floor(R2[i] * 6), a0 = k6 / 6 * Math.PI * 2;
+    const turns = 1.5 + (k6 * 0.37 % 1) * 0.4, h0 = (-360 + (k6 * 0.61 % 1) * 60) * 0.87, h1 = (380 + (k6 * 0.83 % 1) * 220) * 0.87;
+    const s = Math.pow((R1[i] - 0.18) / 0.82, 0.8), ang = a0 + s * turns * Math.PI * 2 * (0.6 + c) + T * 0.6;
+    const rad = ((240 - 110 * c) * (0.5 + 0.6 * Math.sin(Math.PI * s)) + 30 + (R3[i] - 0.5) * 14) * 0.87;
+    x = Math.cos(ang) * rad; y = -35 + h0 + (h1 - h0) * s * (0.5 + c * 0.6) + (R3[i] - 0.5) * 9; z = Math.sin(ang) * rad;
+    a = 0.28 * Math.pow(1 - s, 0.6) * (0.6 + 0.4 * c);
   } else if (m === 'BURST' || m === 'BLOOM') {           // 03 展开：一扇一扇甩开
     const A = (m === 'BLOOM' ? 1 : S.open) * Math.PI * 2, th = SA[i];
     if (th <= A) {
-      const fresh = clamp(1 - (A - th) / (SECT * 1.5));  // 刚甩开的那一扇，往前飘一点
-      [x, y, z] = polar(SR[i] * (1 + 0.04 * fresh), th, 120 * fresh * (R1[i] - 0.3));
+      const fresh = clamp(1 - (A - th) / (SECT * 1.5));
+      [x, y, z] = polar(SR[i] * (1 + 0.03 * fresh), th, 0);
     } else {
       const lead = Math.max(A, SECT);
-      [x, y, z] = polar(SR[i], lead - SECT + foldAngle(th), -(foldIndex(th)) * 4);
+      [x, y, z] = polar(SR[i], lead - SECT + foldAngle(th), 0);
       a *= 0.5;
     }
     if (m === 'BLOOM') { const br = 1 + 0.008 * Math.sin(T * 0.9); x *= br; y *= br; }
-  } else if (m === 'SEAL' || m === 'GATHER') {
-    const back = () => { const t = polar(SR[i], SA[i], 0); return [t[0] * 0.5, t[1] * 0.5, 0]; };
-    if (g < NS && (m === 'GATHER' || g < S.seals)) {     // 04 结印：这一朵已经飞来落位
-      const ang = Math.PI / 2 - g / NS * Math.PI * 2, X = Math.cos(ang) * RR, Y = Math.sin(ang) * RR;
-      const pulse = Math.exp(-S.sealT[g] * 5) * (S.sealT[g] < 2 ? 1 : 0);
-      const e = m === 'GATHER' ? S.gather : 0, sc = SEAL * (1 + 0.3 * e) * (1 + 0.06 * pulse);
-      x = X * (1 - e) + SX[i] * sc; y = Y * (1 - e) + SY[i] * sc; z = -(g + 1) * 190 * e;
-      a *= (m === 'GATHER' ? 0.55 + 0.45 * (1 - e) : 1) * (1 + 1.2 * pulse);
-    } else if (m === 'GATHER') {                         // 05 汇聚：剩下的粒子在中心聚成一朵
-      x = SX[i] * SEAL * 1.5; y = SY[i] * SEAL * 1.5; z = 120; a *= 0.6 * S.gather;
-    } else { [x, y, z] = back(); a *= 0.33; }            // 还没飞来的：在深处做一朵很淡的大团花
-  } else if (m === 'REVEAL' || m === 'HOLD') {           // 06 显形 / 07 定格
-    const R = m === 'HOLD' ? 1 : S.reveal, k = ease((R - L * 0.13) / 0.38), sp = 1 - k;
-    const r = SR[i] * SZ / 2, th0 = Math.atan2(SY[i], SX[i]);
-    const th = th0 + sp * (0.9 + 0.25 * L) + sp * S.twist * 0.6;
-    const rr = r * (1 + sp * 0.5) + sp * (R1[i] - 0.5) * 120;
-    x = Math.cos(th) * rr; y = Math.sin(th) * rr; z = -sp * (700 + 260 * L);
-    a *= 0.3 + 0.7 * k;
-    if (m === 'HOLD') {
-      const br = 0.6 + 0.4 * Math.sin(T * 0.5);
-      z = (L - 2) * -130 * br;
-    }
+  } else if (m === 'SEAL' || m === 'GATHER' || (m === 'REVEAL' && !released(i))) {
+    [x, y, a] = sealTarget(i, m === 'REVEAL' ? 'GATHER' : m, a);
+    z = 0;
+  } else if (m === 'REVEAL' || m === 'HOLD') {           // 06 显形：从花心往外，粒子一圈圈流回大团花（不转）
+    const br = 1 + 0.008 * Math.sin(T * 0.8);
+    [x, y, z] = polar(SR[i] * br, SA[i], 0);
   }
-  out[0] = x; out[1] = y; out[2] = 0; return a;              // 全部平面，不做前后
+  out[0] = x; out[1] = y; out[2] = m === 'CHARGE' && R1[i] >= 0.18 ? z : 0; return a;   // 只有蓄力的螺旋是立体的，其余全部平面
+}
+// 显形时，这颗粒子是不是已经被"放"回大团花了：从花心往外，一圈一圈
+function released(i) { return SR[i] * 0.85 + R3[i] * 0.15 < S.reveal * 1.08; }
+// 04 结印 / 05 汇聚 时每颗粒子的位置
+function sealTarget(i, m, a) {
+  const g = GRP[i];
+  const slot = k => { const ang = Math.PI / 2 - k / NS * Math.PI * 2; return [Math.cos(ang) * RR, Math.sin(ang) * RR]; };
+  if (g < NS && (m === 'GATHER' || g < S.seals)) {       // 已经落位的小团花（粒子从中间飞过去聚成）
+    const [X, Y] = slot(g), pulse = S.sealT[g] < 2 ? Math.exp(-S.sealT[g] * 4) : 0;
+    return [X + SX[i] * SEAL, Y + SY[i] * SEAL, a * (1 + 0.8 * pulse)];
+  }
+  if (m === 'GATHER') {                                  // 05 汇聚：中间聚起一朵；一部分粒子连成五角星的细线
+    if (R1[i] < 0.35) { const k = Math.floor(R2[i] * NS), [ax, ay] = slot(k), [bx, by] = slot((k + 2) % NS), t = R3[i];
+      return [ax + (bx - ax) * t, ay + (by - ay) * t, 0.09 * S.gather]; }
+    return [SX[i] * SEAL * 1.35, SY[i] * SEAL * 1.35, a * 0.9 * S.gather + a * 0.25];
+  }
+  const t = polar(SR[i], SA[i], 0);                      // 还没出来的：中间一朵很淡的小团花
+  return [t[0] * 0.5, t[1] * 0.5, a * 0.33];
+}
+function __unused() {
 }
 
 // 01 觉醒：手的骨头上取一个点（中线亮一点，两侧轮廓淡一点）
@@ -241,7 +246,7 @@ function handPoint(i) {
 // =============================================================
 const tmp = [0, 0, 0];
 function physics(dt, T) {
-  const fast = S.mode === 'BURST' ? 2.2 : S.mode === 'CHARGE' ? 3.2 : S.mode === 'SEAL' ? 0.8 : 1;
+  const fast = S.mode === 'BURST' ? 1.8 : S.mode === 'CHARGE' ? 1.4 : S.mode === 'SEAL' ? 1.0 : S.mode === 'REVEAL' ? 0.6 : 0.8;
   const ka = 1 - Math.exp(-3 * dt);
   for (let i = 0; i < N; i++) {
     const a = target(i, tmp, T), k = 1 - Math.exp(-SPD[i] * fast * dt), j = i * 3;
@@ -389,11 +394,11 @@ function reset() { S.charge = 0; S.open = 0; S.seals = 0; S.gather = 0; S.reveal
 
 // 自动演示的分镜（秒）
 const DEMO = [
-  [0, 'WAIT', ''], [2.5, 'AWAKE', '举起手'], [5, 'CHARGE', '握拳'], [7.6, 'BURST', '猛地张开'], [9.4, 'BLOOM', ''],
-  [10.6, 'SEAL1', '竖起一根手指'], [11.4, 'SEAL2', '竖起一根手指'], [12.2, 'SEAL3', '竖起一根手指'], [13, 'SEAL4', '竖起一根手指'], [13.8, 'SEAL5', '竖起一根手指'],
-  [17, 'GATHER', '捏住'], [19.4, 'REVEAL', '捏着转手腕，再松开'], [23.5, 'HOLD', ''], [31, 'END', '握拳，折回去'],
+  [0, 'WAIT', ''], [1.5, 'CHARGE', '握拳'], [5.0, 'BURST', '猛地张开'], [6.9, 'BLOOM', ''],
+  [8.3, 'SEAL1', '竖起一根手指'], [9.3, 'SEAL2', '竖起一根手指'], [10.3, 'SEAL3', '竖起一根手指'], [11.3, 'SEAL4', '竖起一根手指'], [12.3, 'SEAL5', '竖起一根手指'],
+  [14.0, 'GATHER', '捏住'], [16.6, 'REVEAL', '转手腕，再松开'], [21.0, 'HOLD', ''], [27, 'END', '握拳，折回去'],
 ];
-const DEMO_LEN = 33;
+const DEMO_LEN = 29.5;
 function demo(dt) {
   G.demoT = (G.demoT + dt) % DEMO_LEN;
   let cur = DEMO[0];
@@ -407,7 +412,7 @@ function demo(dt) {
   else if (key === 'GATHER') setMode('GATHER');
   else if (key === 'REVEAL') {
     if (S.mode !== 'REVEAL' && S.mode !== 'HOLD') { setMode('REVEAL'); S.twist = 0; }
-    const u = (G.demoT - t0) / 4.1; S.twist = 1.6 * smooth(u); S.reveal = u < 0.55 ? 0.6 * smooth(u / 0.55) : 0.6 + 0.4 * smooth((u - 0.55) / 0.45);
+    const u = (G.demoT - t0) / 4.2; S.twist = 0; S.reveal = smooth(u);
   }
   else if (key === 'HOLD') setMode('HOLD');
   else if (key === 'AWAKE') setMode('AWAKE');
