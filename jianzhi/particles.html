@@ -168,7 +168,9 @@ const stage4 = () => ring(Math.floor(PROG * NSEAL), PROG * NSEAL % 1 || 0.6, fal
 const stage5 = () => ring(NSEAL, 1, true);
 
 function stage6() {                                   // 显形：粒子旋成涡，从花心往外聚成一整朵
-  camera.position.set(0, -200, 2000); camera.lookAt(0, 0, 0);
+  if (Q.get('tilt') === '1') { camera.position.set(620, -760, 1750); camera.up.set(0.18, 1, 0); }   // 旋涡转起来时：整幅画面带一点倾斜和纵深
+  else camera.position.set(0, -200, 2000);
+  camera.lookAt(0, 0, 0);
   const SZ = 1100, P = PROG, reveal = clamp((P - 0.15) / 0.75);
   flower(110000, SZ, (x, y, i, r) => {
     const d = r * 0.8 + rnd() * 0.12;
@@ -183,7 +185,30 @@ function stage6() {                                   // 显形：粒子旋成�
   dust(2500, () => { const arm = Math.floor(rnd() * 3) * 2.094, r = 500 + rnd() * 1300; const a = arm + r / 400 + gauss() * 0.3; return [Math.cos(a) * r, Math.sin(a) * r * 0.86, gauss() * 200]; }, 0.14);
 }
 
-({ 2: stage2, 3: stage3, 4: stage4, 5: stage5, 6: stage6 })[STAGE]();
+// 手的 21 个关键点（张开的右手，手心朝你），和 MediaPipe 的编号一致
+const HAND = [[0,0],[-45,40],[-85,90],[-115,135],[-140,175],[-45,170],[-55,240],[-60,285],[-63,322],[-5,178],[-5,258],[-5,308],[-5,348],[32,170],[38,240],[42,285],[45,320],[62,150],[75,205],[83,240],[90,272]];
+const BONES = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[0,17],[17,18],[18,19],[19,20]];
+function stage1() {                                   // 觉醒：粒子沿着手掌轮廓和指骨淡淡亮起
+  camera.position.set(0, 0, 1500); camera.lookAt(0, 0, 0);
+  const K = 1.85, OX = 30, OY = -330, P = (i) => [HAND[i][0] * K + OX, HAND[i][1] * K + OY];
+  const wid = [0, 34, 30, 26, 22, 26, 22, 20, 18, 27, 23, 21, 19, 26, 22, 20, 18, 22, 19, 17, 15];
+  for (const [a, b] of BONES) {                       // 每根骨头：中线亮一点，两侧轮廓淡淡的
+    const A = P(a), Bp = P(b), L = Math.hypot(Bp[0] - A[0], Bp[1] - A[1]), nx = -(Bp[1] - A[1]) / L, ny = (Bp[0] - A[0]) / L;
+    const w = wid[b] * K * 0.5, inner = a === 0 || (a === 5 && b === 9) || (a === 9 && b === 13) || (a === 13 && b === 17);
+    for (let i = 0; i < L * 2.2; i++) {
+      const t = rnd(), side = rnd() < 0.5 ? -1 : 1, edge = !inner && rnd() < 0.6;
+      if (inner && rnd() < 0.5) continue;
+      const off = edge ? side * w * (0.92 + gauss() * 0.05) : gauss() * w * 0.25;
+      dot(A[0] + (Bp[0] - A[0]) * t + nx * off, A[1] + (Bp[1] - A[1]) * t + ny * off, gauss() * 8, edge ? RED2 : (rnd() < 0.3 ? GOLD : RED), 1.1 + rnd() * 0.6, edge ? 0.3 : 0.4 * (0.5 + 0.5 * Math.sin(t * Math.PI)));
+    }
+  }
+  for (const i of [0, 1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15, 17, 18, 19]) { const [x, y] = P(i); for (let k = 0; k < 60; k++) dot(x + gauss() * 8, y + gauss() * 8, 0, GOLD, 1.3, 0.35); }
+  const palm = [0, 1, 5, 9, 13, 17].map(P);           // 手心：很稀的一层
+  for (let i = 0; i < 2500; i++) { const a = palm[(rnd() * 6) | 0], b = palm[(rnd() * 6) | 0], c = palm[(rnd() * 6) | 0], u = rnd(), v = rnd() * (1 - u); dot(a[0] + (b[0] - a[0]) * u + (c[0] - a[0]) * v, a[1] + (b[1] - a[1]) * u + (c[1] - a[1]) * v, 0, RED, 1.0, 0.1); }
+  dust(1600, () => { const a = rnd() * 6.28, r = 200 + rnd() * 700; return [Math.cos(a) * r + OX, Math.sin(a) * r * 1.2, gauss() * 200]; }, 0.12);
+}
+
+({ 1: stage1, 2: stage2, 3: stage3, 4: stage4, 5: stage5, 6: stage6 })[STAGE]();
 
 // ---------- 画出来 ----------
 const g = new THREE.BufferGeometry();
