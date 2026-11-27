@@ -68,7 +68,7 @@ for (let i = 0; i < 400000 && HOLES.length < 14000; i++) { const u = rnd(), v = 
 // ---------- 粒子缓冲 ----------
 const B = { p: [], c: [], s: [], a: [] };
 function dot(x, y, z, col, size, alpha) { B.p.push(x, y, z); B.c.push(col[0], col[1], col[2]); B.s.push(size); B.a.push(alpha); }
-const RED = [0.95, 0.05, 0.07], RED2 = [1.0, 0.16, 0.13], GOLD = [0.71, 1.0, 0.24], CYAN = [0.47, 0.9, 1.0], PALE = [1.0, 0.88, 0.74];
+const RED = [0.95, 0.05, 0.07], RED2 = [1.0, 0.16, 0.13], GOLD = [1.0, 0.68, 0.36], CYAN = [0.47, 0.9, 1.0], PALE = [1.0, 0.88, 0.74];
 function pick() { const k = rnd(); return k < 0.8 ? RED : k < 0.97 ? RED2 : k < 0.995 ? GOLD : PALE; }
 
 // 一朵粒子团花。place(x,y,i) -> [X,Y,Z] 或 null（不画）；默认就是平放在 xy 平面
@@ -86,7 +86,7 @@ function flower(n, S, place, o = {}) {
   }
   // 镂空处透出来的光：绿 60%、青 40%（原版配色）
   const hs = Math.max(1, Math.floor(HOLES.length / (n * 0.16)));
-  for (let i = 0; i < HOLES.length; i += hs) {
+  for (let i = 0; i < (o.lights ? HOLES.length : 0); i += hs) {
     const [x, y] = HOLES[i], r = Math.hypot(x, y) * 2, ang = Math.atan2(x, y) / (Math.PI * 2) + 0.5;
     if (o.wipe !== undefined && ang > o.wipe) continue;
     if (o.reveal !== undefined && r > o.reveal) continue;
@@ -206,12 +206,13 @@ scene.add(new THREE.Points(g, new THREE.ShaderMaterial({
   uniforms: { k: { value: H * DPR / 1000 } },
   vertexShader: `attribute float size, alpha; attribute vec3 color; uniform float k; varying vec3 vC; varying float vA;
     void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.); gl_Position = projectionMatrix * mv;
-      float ps = size * 0.85 * k * 1500. / -mv.z; gl_PointSize = max(ps, 1.0); vC = color; vA = alpha * min(1., ps * ps); }`,
+      float ps = size * k * 1500. / -mv.z; gl_PointSize = max(ps, 1.0); vC = color; vA = alpha * min(1., ps * ps); }`,
   fragmentShader: `varying vec3 vC; varying float vA;
-    void main(){ float d = length(gl_PointCoord - .5) * 2.; float a = smoothstep(1.0, 0.55, d) * vA * 2.0; if (a < 0.003) discard; gl_FragColor = vec4(vC, a); }`
+    void main(){ float d = length(gl_PointCoord - .5) * 2.; float a = exp(-d * d * 3.5) * vA * 2.6; if (a < 0.003) discard; gl_FragColor = vec4(vC, a); }`
 })));
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
+composer.addPass(new UnrealBloomPass(new THREE.Vector2(W * DPR, H * DPR), 0.35, 0.7, 0.55));
 composer.addPass(new OutputPass());
 composer.render();
 window.__done = true;
