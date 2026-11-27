@@ -32,7 +32,8 @@ const CFG = {
   MIN_PALM: 0.07,       // 手掌（手腕到中指根）至少占画面高度多少，太远的手不算
 };
 const Q = new URLSearchParams(location.search);
-const NB = 1080, NL = 95, N = 16 * (NB + NL);          // 原版：1/16 扇形里 620 个纸点 + 70 个镂空光点，折 16 次
+const LOOK = { d: +(Q.get('d') || 1), sz: +(Q.get('sz') || 1), soft: +(Q.get('soft') || 0) };
+const NB = Math.round(1080 * LOOK.d), NL = 95, N = 16 * (NB + NL);          // 原版：1/16 扇形里 620 个纸点 + 70 个镂空光点，折 16 次
 const ASPECT = 848 / 600;
 const SZ = 730, SEAL = 200, RR = 260, NS = 5, CAMZ = 2000, FOV = 38;
 const VIS_H = 2 * CAMZ * Math.tan(FOV / 2 * Math.PI / 180), VIS_W = VIS_H / ASPECT;
@@ -124,7 +125,7 @@ async function buildParticles() {
     else if (r < 0.92 && lights.length < NL && rnd() < 0.06) lights.push({ r, phi, lime: rnd() < 0.6 });
   }
   const RED = [0.92, 0.07, 0.12], RED2 = [0.98, 0.22, 0.12], LIME = [182 / 255, 1, 60 / 255], CYAN = [120 / 255, 230 / 255, 1];
-  const K = 1.35 * 1000 / (848 * 0.75);                         // 原版的点大小（海报单位）→ 这里的点大小
+  const K = 1.35 * LOOK.sz * 1000 / (848 * 0.75);                         // 原版的点大小（海报单位）→ 这里的点大小
   let i = 0;
   for (let k = 0; k < 16; k++) {                         // 折纸：16 个扇形，单数的扇形镜像
     for (const list of [paper, lights]) for (const q of list) {
@@ -151,12 +152,12 @@ function makePoints() {
   g.setAttribute('alpha', new THREE.BufferAttribute(ALPHA, 1).setUsage(THREE.DynamicDrawUsage));
   pmat = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-    uniforms: { k: { value: PX_H / 1000 } },
+    uniforms: { k: { value: PX_H / 1000 }, soft: { value: LOOK.soft } },
     vertexShader: `attribute float size, alpha; attribute vec3 color; uniform float k; varying vec3 vC; varying float vA;
       void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.); gl_Position = projectionMatrix * mv;
         float ps = size * k * 1500. / -mv.z; gl_PointSize = max(ps, 1.0); vC = color; vA = alpha * min(1., ps); }`,
-    fragmentShader: `varying vec3 vC; varying float vA;
-      void main(){ float a = vA; if (a < 0.003) discard; gl_FragColor = vec4(vC, a); }`
+    fragmentShader: `uniform float soft; varying vec3 vC; varying float vA;
+      void main(){ vec2 q = abs(gl_PointCoord - .5) * 2.; float d = mix(max(q.x, q.y), length(q), soft); float a = vA * (1. - smoothstep(1. - soft * 0.9, 1.0, d)) * (1. + soft * 0.6); if (a < 0.003) discard; gl_FragColor = vec4(vC, a); }`
   });
   points = new THREE.Points(g, pmat); points.frustumCulled = false; scene.add(points);
   // 手的 21 个关键点：一直淡淡地跟着你的手，让人知道"它看见我了"
