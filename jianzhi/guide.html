@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>掌中展开 · 手势指引</title>
+<style>
+  @page { size: 210mm 297mm; margin: 0; }
+  :root { --bg: #0c0a0b; --ink: #efe6da; --dim: #9c8f80; --gold: #d6b07a; --red: #e2463c; }
+  html, body { margin: 0; background: var(--bg); }
+  .card { width: 210mm; height: 297mm; box-sizing: border-box; padding: 22mm 20mm 18mm; color: var(--ink);
+    font-family: "Noto Sans SC", "WenQuanYi Zen Hei", sans-serif; font-weight: 300; display: flex; flex-direction: column; }
+  .eyebrow { font-size: 8.5pt; letter-spacing: 0.32em; color: var(--dim); }
+  h1 { font-family: "Noto Serif SC", serif; font-weight: 600; font-size: 34pt; letter-spacing: 0.12em; margin: 5mm 0 2mm; }
+  .lead { font-size: 11pt; color: var(--dim); letter-spacing: 0.08em; }
+  .rule { height: 0.3mm; background: linear-gradient(90deg, var(--gold), transparent); opacity: 0.6; margin: 9mm 0 7mm; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6mm 8mm; flex: 1; align-content: space-evenly; }
+  .step { display: flex; gap: 3mm; align-items: center; }
+  .step svg { width: 36mm; height: 36mm; flex: none; margin-left: -4mm; }
+  .no { font-family: "Noto Serif SC", serif; font-size: 9pt; color: var(--gold); letter-spacing: 0.2em; }
+  .g { font-family: "Noto Serif SC", serif; font-weight: 600; font-size: 15pt; letter-spacing: 0.06em; margin: 1.2mm 0 1.6mm; }
+  .e { font-size: 9pt; color: var(--dim); line-height: 1.6; white-space: nowrap; }
+  .foot { display: flex; justify-content: space-between; align-items: flex-end; font-size: 8.5pt; color: var(--dim); letter-spacing: 0.12em; margin-top: 8mm; }
+  .foot b { font-weight: 400; color: var(--ink); }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="eyebrow">HOW TO PLAY · 手势指引</div>
+  <h1>掌中展开</h1>
+  <div class="lead">把一只手举到镜头前，跟着做下去</div>
+  <div class="rule"></div>
+  <div class="grid" id="grid"></div>
+  <div class="foot"><div><b>无人时自动演示</b>　举起手即可接管<br>再握一次拳，回到开始</div><div>数字剪纸 · 非遗新生计划</div></div>
+</div>
+<script>
+// 手的 21 个关键点（MediaPipe 编号），张开的手
+const H = [[0,0],[-45,40],[-85,90],[-115,135],[-140,175],[-45,170],[-55,240],[-60,285],[-63,322],[-5,178],[-5,258],[-5,308],[-5,348],[32,170],[38,240],[42,285],[45,320],[62,150],[75,205],[83,240],[90,272]];
+const BONES = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[0,17],[17,18],[18,19],[19,20]];
+function pose(ext, pinch) {
+  const P = H.map(p => p.slice()), F = [[5,6,7,8],[9,10,11,12],[13,14,15,16],[17,18,19,20]];
+  F.forEach((f, i) => { if (ext[i + 1]) return; const m = P[f[0]], v = [H[f[1]][0] - m[0], H[f[1]][1] - m[1]];
+    P[f[1]] = [m[0] + v[0] * .55, m[1] + v[1] * .55]; P[f[2]] = [m[0] + v[0] * .35, m[1] + v[1] * .35 - 18]; P[f[3]] = [m[0] + v[0] * .15, m[1] - 30]; });
+  if (!ext[0]) { P[2] = [-60, 95]; P[3] = [-35, 125]; P[4] = [-10, 135]; }
+  if (pinch) { P[6] = [-75, 225]; P[7] = [-100, 240]; P[8] = [-112, 222]; P[3] = [-112, 165]; P[4] = [-116, 212]; }
+  return P;
+}
+function hand(P, o = {}) {
+  const t = `translate(${200 + (o.dx || 0)} ${330 + (o.dy || 0)}) rotate(${o.rot || 0}) scale(0.8 -0.8) translate(20 0)`;
+  const lines = BONES.map(([a, b]) => `<line x1="${P[a][0]}" y1="${P[a][1]}" x2="${P[b][0]}" y2="${P[b][1]}"/>`).join('');
+  const dots = P.map(p => `<circle cx="${p[0]}" cy="${p[1]}" r="${[4,8,12,16,20].some(k => P[k] === p) ? 6 : 4.5}"/>`).join('');
+  return `<g transform="${t}" opacity="${o.op ?? 1}"><g stroke="#d6b07a" stroke-width="2.4" stroke-linecap="round" opacity="0.75">${lines}</g><g fill="#e2463c">${dots}</g></g>`;
+}
+const open = pose([1,1,1,1,1]), fist = pose([0,0,0,0,0]);
+const rays = Array.from({ length: 7 }, (_, i) => { const a = -Math.PI / 2 + (i - 3) * 0.36; return `<line x1="${200 + Math.cos(a) * 168}" y1="${232 + Math.sin(a) * 168}" x2="${200 + Math.cos(a) * 190}" y2="${232 + Math.sin(a) * 190}"/>`; }).join('');
+const STEPS = [
+  ['01', '举起手', '五指张开，粒子沿着手掌亮起', hand(open)],
+  ['02', '握拳', '握住不动，粒子绕拳心蓄力', hand(fist)],
+  ['03', '猛地张开', '团花一扇一扇甩开', hand(fist, { op: 0.22, dx: -6, dy: 8 }) + hand(open) + `<g stroke="#d6b07a" stroke-width="2.4" stroke-linecap="round" opacity="0.6">${rays}</g>`],
+  ['04', '伸手指 1 → 5', '伸一根手指，落一枚小团花', hand(pose([0,1,1,0,0])) + `<text x="40" y="58" fill="#d6b07a" font-size="34" font-family="Noto Serif SC, serif">1 → 5</text>`],
+  ['05', '捏住', '拇指捏住食指，五枚连成一朵', hand(pose([1,1,1,1,1], true))],
+  ['06', '转手腕 · 松开', '捏着转出旋涡，松手聚成大团花', hand(pose([1,1,1,1,1], true), { rot: -20 }) + `<path d="M75 130 A170 170 0 0 1 320 120" fill="none" stroke="#d6b07a" stroke-width="2.4" opacity="0.7"/><path d="M322 104 L332 128 L306 126 Z" fill="#d6b07a" opacity="0.7"/>`],
+];
+document.getElementById('grid').innerHTML = STEPS.map(([n, g, e, svg]) =>
+  `<div class="step"><svg viewBox="0 0 400 400">${svg}</svg><div><div class="no">${n}</div><div class="g">${g}</div><div class="e">${e}</div></div></div>`).join('');
+</script>
+</body>
+</html>
