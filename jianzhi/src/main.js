@@ -130,7 +130,7 @@ async function buildParticles() {
     for (const list of [paper, lights]) for (const q of list) {
       const th = k * WEDGE + (k % 2 ? WEDGE - q.phi : q.phi);
       SR[i] = q.r; SA[i] = th; SX[i] = Math.sin(th) * q.r / 2; SY[i] = Math.cos(th) * q.r / 2;
-      LAY[i] = layerOf(q.r); GRP[i] = i % 6; R1[i] = rnd(); R2[i] = rnd(); R3[i] = rnd(); SPD[i] = 3.2;   // 所有点同一个速度：整体干净地移动，不散、不拖影
+      LAY[i] = layerOf(q.r); GRP[i] = i % 6; R1[i] = rnd(); R2[i] = rnd(); R3[i] = rnd(); SPD[i] = 7.0;   // 所有点同一个速度：整体干净地移动，不散、不拖影
       if (list === paper) { LIGHT[i] = 0; COL.set(q.c ? RED2 : RED, i * 3); SIZE[i] = q.sz * K; BASEA[i] = q.c ? 0.55 : 0.62; }
       else { LIGHT[i] = 1; COL.set(q.lime ? LIME : CYAN, i * 3); SIZE[i] = 1.6 * K; BASEA[i] = 0.75; }
       i++;
@@ -203,13 +203,14 @@ function target(i, out, T) {
   if (m === 'WAIT' || m === 'AWAKE' || m === 'CHARGE' || m === 'BURST' || m === 'BLOOM') {
     // 01 折叠：一个小角 → 02 蓄力：从一个角慢慢长成一把扇子 → 03 展开：扇子打开成整朵
     let A, rs;
-    if (m === 'WAIT' || m === 'AWAKE') { A = SECT; rs = 0.35 + 0.01 * Math.sin(T * 1.2); }
-    else if (m === 'CHARGE') { const c = smooth(S.charge); A = SECT * (1 + 3 * c); rs = 0.35 + 0.55 * c; }
-    else if (m === 'BURST') { const o = smooth(S.open); A = SECT * 4 + (Math.PI * 2 - SECT * 4) * o; rs = 0.9 + 0.1 * o; }
+    let grow = 1;                                         // 小三角从尖角往上浮现到哪（0..1）
+    if (m === 'WAIT' || m === 'AWAKE') { A = SECT; rs = 0.9; grow = 0.12; }
+    else if (m === 'CHARGE') { A = SECT; rs = 0.9; grow = 0.12 + 0.88 * smooth(S.charge); }
+    else if (m === 'BURST') { const o = smooth(S.open); A = SECT + (Math.PI * 2 - SECT) * o; rs = 0.9 + 0.1 * o; }
     else { A = Math.PI * 2; rs = 1 + 0.008 * Math.sin(T * 0.9); }
     [x, y, z] = fanTarget(i, A, rs);
     const open = A / (Math.PI * 2);
-    a = BASEA[i] * (SA[i] <= A ? 1 : 0.35);
+    a = BASEA[i] * (SA[i] <= A ? 1 : 0.35) * clamp((grow * 1.04 - SR[i]) / 0.04);
     if (LIGHT[i]) a = open > 0.5 && SA[i] <= A ? BASEA[i] * clamp((open - 0.5) * 2) * (0.35 + 0.65 * (0.5 + 0.5 * Math.sin(T * 3 + R1[i] * 10))) : 0;
   } else if (m === 'SEAL' || m === 'GATHER' || (m === 'REVEAL' && !released(i))) {
     [x, y, a] = sealTarget(i, m === 'REVEAL' ? 'GATHER' : m, a);
@@ -234,8 +235,9 @@ function sealTarget(i, m, a) {
     return [px + (cx - px) * e, py + (cy - py) * e, a * (1 + 0.8 * pulse) * (1 - 0.78 * e)];   // 叠到中间后变淡，不过曝
   }
   if (m === 'GATHER') return [cx, cy, a * e];            // 中间这一朵：五朵到了中间才显出来
-  const t = fanTarget(i, Math.PI * 2, 1);                // 还没飞出来的：留在大团花原位，慢慢淡掉
-  return [t[0], t[1], 0];
+  if (S.t < 0.35 || g >= NS) { const t = fanTarget(i, Math.PI * 2, 1); return [t[0], t[1], 0]; }   // 大团花原地迅速淡掉
+  if (g < NS) { const [X, Y] = slot(g); return [X + SX[i] * SEAL, Y + SY[i] * SEAL - 70, 0]; }   // 藏在自己位置的正下方，出来时往上一冒
+  return [cx, cy, 0];
 }
 function __unused() {
 }
@@ -258,8 +260,8 @@ function handPoint(i) {
 // =============================================================
 const tmp = [0, 0, 0];
 function physics(dt, T) {
-  const fast = S.mode === 'BURST' || S.mode === 'CHARGE' ? 3.0 : 1.0;   // 展开时紧跟扇面，像一张纸整体打开
-  const ka = 1 - Math.exp(-3 * dt);
+  const fast = S.mode === 'BURST' ? 2.4 : 1.0;   // 展开时紧跟扇面，像一张纸整体打开
+  const ka = 1 - Math.exp(-9 * dt);
   for (let i = 0; i < N; i++) {
     const a = target(i, tmp, T), k = 1 - Math.exp(-SPD[i] * fast * dt), j = i * 3;
     POS[j] += (tmp[0] - POS[j]) * k; POS[j + 1] += (tmp[1] - POS[j + 1]) * k; POS[j + 2] += (tmp[2] - POS[j + 2]) * k;
@@ -366,14 +368,15 @@ function interact(h, dt) {
     if (held('fist', 0.25)) { setMode('CHARGE'); S.charge = 0; progress(); }
     else if (h.count >= 3) { if (m === 'WAIT') progress(); setMode('AWAKE'); }
   } else if (m === 'CHARGE') {
-    if (h.fist) S.charge = Math.min(1, S.charge + dt / 2.2);
+    if (h.fist) S.charge = Math.min(1, S.charge + dt / 1.0);
     if (h.open) { if (S.charge > 0.12) { setMode('BURST'); S.open = 0; progress(); } else setMode('AWAKE'); }
   } else if (m === 'BLOOM' || m === 'SEAL') {
     // 04 结印：竖起一根手指并保持住，小团花一朵接一朵慢慢出现（每 0.8 秒一朵）；放下手指就停在那里
     if (held('n1', 0.2) && S.seals < NS) {
       G.sealClock = (G.sealClock || 0) + dt;
-      if (S.seals === 0 || G.sealClock >= 0.8) { G.sealClock = 0; S.seals++; S.sealT[S.seals - 1] = 0; setMode('SEAL'); progress(); }
-    } else G.sealClock = 0.8;
+      if (S.mode !== 'SEAL') { setMode('SEAL'); G.sealClock = 0; progress(); }
+      if (G.sealClock >= 0.4) { G.sealClock = 0; S.seals++; S.sealT[S.seals - 1] = 0; progress(); }
+    } else G.sealClock = 0;
     if (S.seals >= 1 && held('pinch', 0.2)) {           // 宽容：没伸满五根也能直接捏
       S.seals = NS; setMode('GATHER'); S.gather = 0; S.twist = 0; G.lastRoll = h.roll; progress();
     }
@@ -396,8 +399,8 @@ function interact(h, dt) {
 function autoAdvance(dt) {
   const m = S.mode;
   for (let k = 0; k < NS; k++) S.sealT[k] += dt;
-  if (m === 'BURST') { S.open = Math.min(1, S.open + dt / 1.5); if (S.open >= 1) setMode('BLOOM'); }
-  if (m === 'GATHER') S.gather = Math.min(1, S.gather + dt / 2.0);
+  if (m === 'BURST') { S.open = Math.min(1, S.open + dt / 0.7); if (S.open >= 1) setMode('BLOOM'); }
+  if (m === 'GATHER') S.gather = Math.min(1, S.gather + dt / 0.9);
   if (m === 'REVEAL' && G.autoReveal) { S.reveal = Math.min(1, S.reveal + dt / 2.6); }
   if (m === 'REVEAL' && S.reveal >= 1) { setMode('HOLD'); G.autoReveal = false; progress(); }
   if (m === 'REVEAL' && !G.autoReveal) S.twist += dt * 0.15 * Math.sign(S.twist || 1);
@@ -406,11 +409,11 @@ function reset() { S.charge = 0; S.open = 0; S.seals = 0; S.gather = 0; S.reveal
 
 // 自动演示的分镜（秒）
 const DEMO = [
-  [0, 'WAIT', ''], [1.5, 'CHARGE', '握拳'], [5.0, 'BURST', '猛地张开'], [6.9, 'BLOOM', ''],
-  [8.3, 'SEAL1', '竖起一根手指'], [9.3, 'SEAL2', '竖起一根手指'], [10.3, 'SEAL3', '竖起一根手指'], [11.3, 'SEAL4', '竖起一根手指'], [12.3, 'SEAL5', '竖起一根手指'],
-  [14.0, 'GATHER', '捏住'], [16.6, 'REVEAL', '转手腕，再松开'], [21.0, 'HOLD', ''], [27, 'END', '握拳，折回去'],
+  [0, 'WAIT', ''], [1.0, 'CHARGE', '握拳'], [2.2, 'BURST', '猛地张开'], [3.0, 'BLOOM', ''],
+  [4.2, 'SEAL0', '竖起一根手指'], [4.6, 'SEAL1', '竖起一根手指'], [5.0, 'SEAL2', '竖起一根手指'], [5.4, 'SEAL3', '竖起一根手指'], [5.8, 'SEAL4', '竖起一根手指'], [6.2, 'SEAL5', '竖起一根手指'],
+  [7.2, 'GATHER', '捏住'], [8.5, 'REVEAL', '转手腕，再松开'], [10.2, 'HOLD', ''], [15, 'END', '握拳，折回去'],
 ];
-const DEMO_LEN = 29.5;
+const DEMO_LEN = 16;
 function demo(dt) {
   G.demoT = (G.demoT + dt) % DEMO_LEN;
   let cur = DEMO[0];
@@ -418,13 +421,13 @@ function demo(dt) {
   const [t0, key, label] = cur;
   if (key === 'END' || (key === 'WAIT' && S.mode !== 'WAIT')) { if (S.mode !== 'WAIT') { reset(); setMode('WAIT'); } }
   else if (key.startsWith('SEAL')) { const n = +key[4]; if (S.seals < n) { S.seals = n; S.sealT[n - 1] = 0; } setMode('SEAL'); }
-  else if (key === 'CHARGE') { setMode('CHARGE'); S.charge = clamp((G.demoT - t0) / 2.4); }
+  else if (key === 'CHARGE') { setMode('CHARGE'); S.charge = clamp((G.demoT - t0) / 1.0); }
   else if (key === 'BURST') { if (S.mode !== 'BURST' && S.mode !== 'BLOOM') { setMode('BURST'); S.open = 0; } }
   else if (key === 'BLOOM') { if (S.mode === 'BURST' && S.open < 1) {} else setMode('BLOOM'); }
   else if (key === 'GATHER') setMode('GATHER');
   else if (key === 'REVEAL') {
     if (S.mode !== 'REVEAL' && S.mode !== 'HOLD') { setMode('REVEAL'); S.twist = 0; }
-    const u = (G.demoT - t0) / 4.2; S.twist = 0; S.reveal = smooth(u);
+    const u = (G.demoT - t0) / 1.5; S.twist = 0; S.reveal = smooth(u);
   }
   else if (key === 'HOLD') setMode('HOLD');
   else if (key === 'AWAKE') setMode('AWAKE');
