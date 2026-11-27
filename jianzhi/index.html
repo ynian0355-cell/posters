@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>掌中展开 · 数字剪纸</title>
+<style>
+  :root { --ink: #efe6da; --dim: #8f8274; --gold: #d6b07a; }
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; cursor: none; }
+  body { display: flex; align-items: center; justify-content: center; font-family: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", serif; }
+  #frame { position: relative; background: #040305; }
+  #frame canvas { display: block; width: 100%; height: 100%; }
+  .ui { position: absolute; color: var(--ink); pointer-events: none; transition: opacity .6s; }
+  #top { left: 6.5%; top: 4.6%; }
+  #top .eb { font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif; font-weight: 300; font-size: max(9px, 1.15vh); letter-spacing: .34em; color: var(--dim); }
+  #top h1 { margin: 1.1vh 0 0; font-weight: 600; font-size: 3.6vh; letter-spacing: .14em; }
+  #hint { left: 0; right: 0; bottom: 5.2%; text-align: center; font-size: 1.75vh; letter-spacing: .3em; color: var(--dim); opacity: 0; transition: opacity .5s, color .8s; }
+  #hint.strong { color: var(--gold); animation: breathe 2.4s ease-in-out infinite; }
+  @keyframes breathe { 50% { opacity: .55; } }
+  #cam { right: 6.5%; top: 4.9%; font-family: sans-serif; font-size: 1.1vh; letter-spacing: .2em; color: #b0453a; }
+  #corner { right: 6.5%; bottom: 2.4%; font-family: sans-serif; font-size: 1vh; letter-spacing: .24em; color: #4a4038; }
+  body.clean .ui { opacity: 0 !important; }
+  video { display: none; }
+</style>
+</head>
+<body>
+<div id="frame">
+  <div class="ui" id="top"><div class="eb">数字剪纸 · 非遗新生计划</div><h1>掌中展开</h1></div>
+  <div class="ui" id="cam"></div>
+  <div class="ui" id="hint"></div>
+  <div class="ui" id="corner">佛山剪纸 · 国家级非遗</div>
+</div>
+<video id="vid" playsinline muted></video>
+<script src="tuanhua.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
