@@ -32,7 +32,7 @@ const CFG = {
   MIN_PALM: 0.07,       // 手掌（手腕到中指根）至少占画面高度多少，太远的手不算
 };
 const Q = new URLSearchParams(location.search);
-const NB = 1000, NL = 90, N = 16 * (NB + NL);          // 原版：1/16 扇形里 620 个纸点 + 70 个镂空光点，折 16 次
+const NB = 1080, NL = 95, N = 16 * (NB + NL);          // 原版：1/16 扇形里 620 个纸点 + 70 个镂空光点，折 16 次
 const ASPECT = 848 / 600;
 const SZ = 730, SEAL = 200, RR = 260, NS = 5, CAMZ = 2000, FOV = 38;
 const VIS_H = 2 * CAMZ * Math.tan(FOV / 2 * Math.PI / 180), VIS_W = VIS_H / ASPECT;
