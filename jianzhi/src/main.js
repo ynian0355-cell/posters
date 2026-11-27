@@ -32,11 +32,11 @@ const CFG = {
   MIN_PALM: 0.07,       // 手掌（手腕到中指根）至少占画面高度多少，太远的手不算
 };
 const Q = new URLSearchParams(location.search);
-const N = +(Q.get('n') || 100000);
+const NB = 820, NL = 80, N = 16 * (NB + NL);          // 原版：1/16 扇形里 620 个纸点 + 70 个镂空光点，折 16 次
 const ASPECT = 848 / 600;
-const SZ = 780, SEAL = 200, RR = 260, NS = 5, CAMZ = 2000, FOV = 38;
+const SZ = 730, SEAL = 200, RR = 260, NS = 5, CAMZ = 2000, FOV = 38;
 const VIS_H = 2 * CAMZ * Math.tan(FOV / 2 * Math.PI / 180), VIS_W = VIS_H / ASPECT;
-const SECT = Math.PI * 2 / 12;
+const SECT = Math.PI * 2 / 16;
 
 const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
 const ease = x => { x = clamp(x); return 1 - Math.pow(1 - x, 3); };
@@ -60,7 +60,6 @@ camera.position.set(0, 0, CAMZ);
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
 const bloom = new UnrealBloomPass(new THREE.Vector2(600, 848), 0.35, 0.7, 0.55);
-composer.addPass(bloom);
 composer.addPass(new OutputPass());
 let PX_H = 848;
 function fit() {
@@ -93,31 +92,51 @@ const R1 = new Float32Array(N), R2 = new Float32Array(N), R3 = new Float32Array(
 const POS = new Float32Array(N * 3), ALPHA = new Float32Array(N), COL = new Float32Array(N * 3), SIZE = new Float32Array(N);
 const BASEA = new Float32Array(N);
 
-async function buildParticles() {
-  const PS = 1024, PIX = await patternPixels(PS);
-  const on = (u, v) => (u >= 0 && v >= 0 && u < 1 && v < 1) && PIX[((v * PS | 0) * PS + (u * PS | 0)) * 4] > 128;
-  const e = 2.2 / PS;
-  const RED = [0.95, 0.05, 0.07], RED2 = [1.0, 0.16, 0.13], GOLD = [1.0, 0.68, 0.36], PALE = [1.0, 0.88, 0.74];
-  let i = 0, tries = 0;
-  while (i < N && tries < N * 40) {
-    tries++;
-    const u = rnd(), v = rnd();
-    if (!on(u, v)) continue;
-    const edge = !(on(u + e, v) && on(u - e, v) && on(u, v + e) && on(u, v - e));
-    if (!edge && rnd() < 0.45) continue;
-    const x = u - 0.5, y = 0.5 - v;
-    SX[i] = x; SY[i] = y; SR[i] = Math.hypot(x, y) * 2;
-    SA[i] = ((Math.atan2(x, y) + Math.PI * 2) % (Math.PI * 2));            // 从正上方顺时针
-    LAY[i] = layerOf(SR[i]); EDGE[i] = edge ? 1 : 0; GRP[i] = i % 6;
-    R1[i] = rnd(); R2[i] = rnd(); R3[i] = rnd(); SPD[i] = 2.0 + rnd() * 2.6;
-    const k = rnd(), c = edge ? (rnd() < 0.08 ? GOLD : RED2) : (k < 0.8 ? RED : k < 0.97 ? RED2 : k < 0.995 ? GOLD : PALE);
-    COL.set(c, i * 3);
-    SIZE[i] = (edge ? 1.6 : 1.25) * (0.7 + rnd() * 0.6);
-    BASEA[i] = edge ? 0.55 : 0.32;
-    i++;
+// 原版团花纹样（一笔没改）：只设计 1/16 的扇形
+const WEDGE = SECT;
+function isPaper(r, phi) {
+  const t = phi / WEDGE;
+  if (r < 0.09) return true; if (r < 0.12) return false; if (r < 0.15) return true;
+  if (r < 0.50) {
+    const s = (r - 0.15) / 0.35, hw = WEDGE * 0.95 * Math.sin(Math.PI * Math.pow(s, 0.8));
+    if (phi < hw) { if (phi < WEDGE * 0.07) return true; if (phi < hw * 0.55 && s > 0.2 && s < 0.8) return false; return true; }
+    const dx = (r - 0.36), dy = (phi - WEDGE * 0.85) * r; return dx * dx + dy * dy < 0.0011;
   }
-  // 一开始：折起来的样子
-  for (let j = 0; j < N; j++) { const t = foldedTarget(j); POS[j * 3] = t[0]; POS[j * 3 + 1] = t[1]; POS[j * 3 + 2] = t[2]; ALPHA[j] = 0; }
+  if (r < 0.53) return true;
+  if (r < 0.61) return ((t * 3) % 1) < (r - 0.53) / 0.08;
+  if (r < 0.90) {
+    const s = (r - 0.61) / 0.29, d = WEDGE - phi, hw = WEDGE * 0.98 * Math.sin(Math.PI * Math.pow(s, 0.9));
+    if (d < hw) { if (d < WEDGE * 0.06) return true; if (d > hw * 0.72) return true;
+      const m = (s - 0.55) * 3.2, n = (d / hw - 0.3) * 2.2; return (m * m + n * n < 0.25) && !(m * m + (n + 0.35) * (n + 0.35) < 0.2); }
+    return Math.abs(s - 0.5) * 1.2 + (phi / WEDGE) * 2.2 < 0.55;
+  }
+  if (r < 0.93) return true;
+  return r < 0.93 + 0.07 * Math.abs(Math.cos(t * Math.PI));
+}
+const LIGHT = new Uint8Array(N);
+async function buildParticles() {
+  const paper = [], lights = [];
+  let tries = 0;
+  while (paper.length < NB && tries < 200000) {
+    tries++;
+    const r = Math.sqrt(rnd()), phi = rnd() * WEDGE;
+    if (isPaper(r, phi)) paper.push({ r, phi, sz: 1.3 + rnd() * 0.8, c: rnd() < 0.8 ? 0 : 1 });
+    else if (r < 0.92 && lights.length < NL && rnd() < 0.06) lights.push({ r, phi, lime: rnd() < 0.6 });
+  }
+  const RED = [0.92, 0.07, 0.12], RED2 = [0.98, 0.22, 0.12], LIME = [182 / 255, 1, 60 / 255], CYAN = [120 / 255, 230 / 255, 1];
+  const K = 1.35 * 1000 / (848 * 0.75);                         // 原版的点大小（海报单位）→ 这里的点大小
+  let i = 0;
+  for (let k = 0; k < 16; k++) {                         // 折纸：16 个扇形，单数的扇形镜像
+    for (const list of [paper, lights]) for (const q of list) {
+      const th = k * WEDGE + (k % 2 ? WEDGE - q.phi : q.phi);
+      SR[i] = q.r; SA[i] = th; SX[i] = Math.sin(th) * q.r / 2; SY[i] = Math.cos(th) * q.r / 2;
+      LAY[i] = layerOf(q.r); GRP[i] = i % 6; R1[i] = rnd(); R2[i] = rnd(); R3[i] = rnd(); SPD[i] = 2.0 + rnd() * 2.4;
+      if (list === paper) { LIGHT[i] = 0; COL.set(q.c ? RED2 : RED, i * 3); SIZE[i] = q.sz * K; BASEA[i] = q.c ? 0.55 : 0.62; }
+      else { LIGHT[i] = 1; COL.set(q.lime ? LIME : CYAN, i * 3); SIZE[i] = 1.6 * K; BASEA[i] = 0.75; }
+      i++;
+    }
+  }
+  for (let j = 0; j < N; j++) { const t = fanTarget(j, SECT, 0.35); POS[j * 3] = t[0]; POS[j * 3 + 1] = t[1]; POS[j * 3 + 2] = 0; ALPHA[j] = 0; }
 }
 
 // =============================================================
@@ -135,9 +154,9 @@ function makePoints() {
     uniforms: { k: { value: PX_H / 1000 } },
     vertexShader: `attribute float size, alpha; attribute vec3 color; uniform float k; varying vec3 vC; varying float vA;
       void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.); gl_Position = projectionMatrix * mv;
-        float ps = size * k * 1500. / -mv.z; gl_PointSize = max(ps, 1.0); vC = color; vA = alpha * min(1., ps * ps); }`,
+        float ps = size * k * 1500. / -mv.z; gl_PointSize = max(ps, 1.0); vC = color; vA = alpha * min(1., ps); }`,
     fragmentShader: `varying vec3 vC; varying float vA;
-      void main(){ float d = length(gl_PointCoord - .5) * 2.; float a = exp(-d * d * 3.5) * vA * 2.6; if (a < 0.003) discard; gl_FragColor = vec4(vC, a); }`
+      void main(){ float a = vA; if (a < 0.003) discard; gl_FragColor = vec4(vC, a); }`
   });
   points = new THREE.Points(g, pmat); points.frustumCulled = false; scene.add(points);
   // 手的 21 个关键点：一直淡淡地跟着你的手，让人知道"它看见我了"
@@ -159,6 +178,15 @@ const ROT0 = -SECT / 2;                                  // 折起来时，那�
 function polar(r, th, z) { const a = th + ROT0; return [Math.sin(a) * r * SZ / 2, Math.cos(a) * r * SZ / 2, z]; }
 function foldIndex(th) { return Math.floor(th / SECT); }
 function foldAngle(th) { const k = foldIndex(th), f = th - k * SECT; return k % 2 ? SECT - f : f; }   // 像折扇一样来回折
+// 折起来的扇面：A = 已经打开的角度，rs = 半径比例。打开的部分按原位摆，没打开的叠在扇面两边
+function fanTarget(i, A, rs) {
+  const th = SA[i], off = -A / 2;
+  let ang;
+  if (th <= A) ang = th + off;
+  else ang = ((th - A) < (Math.PI * 2 - A) / 2) ? A / 2 - SECT + foldAngle(th) : -A / 2 + SECT - foldAngle(th);
+  const r = SR[i] * rs * SZ / 2;
+  return [Math.sin(ang) * r, Math.cos(ang) * r, 0];
+}
 function foldedTarget(i) { const th = SA[i], k = foldIndex(th), t = polar(SR[i] * 0.9, foldAngle(th), 0); t[1] -= 210; return t; }   // 折起来的一小角，放在画面正中
 
 const S = {                                              // 整个作品此刻的状态
@@ -172,40 +200,26 @@ function setMode(m) { if (S.mode !== m) { S.mode = m; S.t = 0; } }
 function target(i, out, T) {
   const m = S.mode, g = GRP[i], L = LAY[i];
   let x, y, z, a = BASEA[i];
-  if (m === 'WAIT' || m === 'AWAKE' || (m === 'CHARGE' && R1[i] < 0.18)) {
-    const t = foldedTarget(i); x = t[0]; y = t[1]; z = t[2];
-    const br = 1 + 0.015 * Math.sin(T * 1.2);
-    x *= br; y *= br;
-    a *= m === 'CHARGE' ? 0.45 + 0.4 * S.charge : 0.32;
-    if (false) {        // 01 觉醒：四分之一的粒子去描你的手
-      const hp = handPoint(i); if (hp) { x = hp[0]; y = hp[1]; z = hp[2]; a = BASEA[i] * 0.9; }
-    }
-  } else if (m === 'CHARGE') {                           // 02 蓄力：六条粒子带绕着拳心螺旋往上卷（和分镜图一样）
-    const c = S.charge, k6 = Math.floor(R2[i] * 6), a0 = k6 / 6 * Math.PI * 2;
-    const turns = 1.5 + (k6 * 0.37 % 1) * 0.4, h0 = (-360 + (k6 * 0.61 % 1) * 60) * 0.87, h1 = (380 + (k6 * 0.83 % 1) * 220) * 0.87;
-    const s = Math.pow((R1[i] - 0.18) / 0.82, 0.8), ang = a0 + s * turns * Math.PI * 2 * (0.6 + c) + T * 0.6;
-    const rad = ((240 - 110 * c) * (0.5 + 0.6 * Math.sin(Math.PI * s)) + 30 + (R3[i] - 0.5) * 14) * 0.87;
-    x = Math.cos(ang) * rad; y = -35 + h0 + (h1 - h0) * s * (0.5 + c * 0.6) + (R3[i] - 0.5) * 9; z = Math.sin(ang) * rad;
-    a = 0.28 * Math.pow(1 - s, 0.6) * (0.6 + 0.4 * c);
-  } else if (m === 'BURST' || m === 'BLOOM') {           // 03 展开：一扇一扇甩开
-    const A = (m === 'BLOOM' ? 1 : S.open) * Math.PI * 2, th = SA[i];
-    if (th <= A) {
-      const fresh = clamp(1 - (A - th) / (SECT * 1.5));
-      [x, y, z] = polar(SR[i] * (1 + 0.03 * fresh), th, 0);
-    } else {
-      const lead = Math.max(A, SECT);
-      [x, y, z] = polar(SR[i], lead - SECT + foldAngle(th), 0);
-      a *= 0.5;
-    }
-    if (m === 'BLOOM') { const br = 1 + 0.008 * Math.sin(T * 0.9); x *= br; y *= br; }
+  if (m === 'WAIT' || m === 'AWAKE' || m === 'CHARGE' || m === 'BURST' || m === 'BLOOM') {
+    // 01 折叠：一个小角 → 02 蓄力：从一个角慢慢长成一把扇子 → 03 展开：扇子打开成整朵
+    let A, rs;
+    if (m === 'WAIT' || m === 'AWAKE') { A = SECT; rs = 0.35 + 0.01 * Math.sin(T * 1.2); }
+    else if (m === 'CHARGE') { const c = smooth(S.charge); A = SECT * (1 + 3 * c); rs = 0.35 + 0.55 * c; }
+    else if (m === 'BURST') { const o = smooth(S.open); A = SECT * 4 + (Math.PI * 2 - SECT * 4) * o; rs = 0.9 + 0.1 * o; }
+    else { A = Math.PI * 2; rs = 1 + 0.008 * Math.sin(T * 0.9); }
+    [x, y, z] = fanTarget(i, A, rs);
+    const open = A / (Math.PI * 2);
+    a = BASEA[i] * (SA[i] <= A ? 1 : 0.35);
+    if (LIGHT[i]) a = open > 0.5 && SA[i] <= A ? BASEA[i] * clamp((open - 0.5) * 2) * (0.35 + 0.65 * (0.5 + 0.5 * Math.sin(T * 3 + R1[i] * 10))) : 0;
   } else if (m === 'SEAL' || m === 'GATHER' || (m === 'REVEAL' && !released(i))) {
     [x, y, a] = sealTarget(i, m === 'REVEAL' ? 'GATHER' : m, a);
-    z = 0;
+    z = 0; if (LIGHT[i]) a *= 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(T * 3 + R1[i] * 10));
   } else if (m === 'REVEAL' || m === 'HOLD') {           // 06 显形：从花心往外，粒子一圈圈流回大团花（不转）
     const br = 1 + 0.008 * Math.sin(T * 0.8);
-    [x, y, z] = polar(SR[i] * br, SA[i], 0);
+    [x, y, z] = fanTarget(i, Math.PI * 2, br);
+    if (LIGHT[i]) a *= 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(T * 3 + R1[i] * 10));
   }
-  out[0] = x; out[1] = y; out[2] = m === 'CHARGE' && R1[i] >= 0.18 ? z : 0; return a;   // 只有蓄力的螺旋是立体的，其余全部平面
+  out[0] = x; out[1] = y; out[2] = 0; return a;   // 只有蓄力的螺旋是立体的，其余全部平面
 }
 // 显形时，这颗粒子是不是已经被"放"回大团花了：从花心往外，一圈一圈
 function released(i) { return SR[i] * 0.85 + R3[i] * 0.15 < S.reveal * 1.08; }
@@ -222,8 +236,7 @@ function sealTarget(i, m, a) {
       return [ax + (bx - ax) * t, ay + (by - ay) * t, 0.09 * S.gather]; }
     return [SX[i] * SEAL * 1.35, SY[i] * SEAL * 1.35, a * 0.9 * S.gather + a * 0.25];
   }
-  const t = polar(SR[i], SA[i], 0);                      // 还没出来的：中间一朵很淡的小团花
-  return [t[0] * 0.5, t[1] * 0.5, a * 0.33];
+  return [SX[i] * SZ * 0.5, SY[i] * SZ * 0.5, a * 0.33];   // 还没出来的：中间一朵很淡的小团花
 }
 function __unused() {
 }
