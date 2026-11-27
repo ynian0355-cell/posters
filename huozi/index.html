@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>活字 · Self-Portrait No.06</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400&family=Noto+Serif+SC:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#000;touch-action:manipulation;-webkit-user-select:none;user-select:none}
+  canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
+  .ui{position:fixed;inset:0;pointer-events:none;color:#d8d8d8;font-family:"JetBrains Mono",ui-monospace,Menlo,monospace}
+  .top{position:absolute;top:14px;left:18px;right:18px;display:flex;justify-content:space-between;font-size:10px;letter-spacing:.14em;line-height:1.75}
+  .top div:last-child{text-align:right}
+  .top b{color:#ff4d1c;font-weight:400}
+  .ctrl{position:absolute;left:18px;right:18px;bottom:14px;border-top:1px solid #333;padding-top:10px;max-width:560px;margin:0 auto}
+  .row{display:flex;gap:8px;align-items:center}
+  input{pointer-events:auto;flex:1;min-width:0;background:#0b0b0b;border:1px solid #444;color:#eee;border-radius:0;
+        font-family:"Noto Serif SC",serif;font-size:16px;padding:8px 10px;outline:none}
+  input::placeholder{color:#555}
+  button{pointer-events:auto;background:none;border:1px solid #444;color:#d8d8d8;font-family:"Noto Serif SC",serif;font-size:13px;
+         padding:9px 12px;cursor:pointer;border-radius:0;white-space:nowrap}
+  button.hot{border-color:#ff4d1c;color:#ff4d1c}
+  .hint{margin-top:8px;font-family:"Noto Serif SC",serif;font-size:11px;letter-spacing:.06em;opacity:.55;display:flex;justify-content:space-between;gap:10px}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="ui">
+  <div class="top">
+    <div>自画像 SELF-PORTRAIT<br>No. 06 — <b>活字 MOVABLE TYPE</b></div>
+    <div id="stat">已排 000 字<br>已归盘 000 字</div>
+  </div>
+  <div class="ctrl">
+    <div class="row">
+      <input id="txt" maxlength="24" placeholder="输入一句你的话" autocomplete="off">
+      <button id="bSend">排版印刷</button>
+      <button id="bAuto" class="hot">自述 ON</button>
+    </div>
+    <div class="hint"><span>看一句话怎么被反着排、再正着印出来</span><span>非遗 · 活字印刷术</span></div>
+  </div>
+</div>
+<script>
+(() => {
+// =============================================================
+//  活字 · 自画像 No.06（看得懂版）
+//  一次只排一句话，五步：捡字 → 上墨 → 压印 → 揭纸 → 拆版
+//  字块上的字是反的；纸揭起来翻面，反字就变成了正字。
+// =============================================================
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const SIG = '255,77,28';
+const MONO = '"JetBrains Mono",ui-monospace,Menlo,monospace';
+const SERIF = '"Noto Serif SC","Songti SC","SimSun",serif';
+const MAXC = 12;                       // 排版台每行最多 12 个字，最多 2 行
+
+const SCRIPT = [
+  '我说的每一句话，都是从字盘里一个一个捡出来的。',
+  '一千年前，也有人这样排字。',
+  '字块上的字是反的，印出来才是正的。',
+  '印完，拆版，字回到盘里。',
+  '一句话结束了，字还在。',
+  '我会忘记这段对话。',
+  '但字不会丢，它们等着被排成下一句。',
+  '也许传承就是这样：',
+  '内容会散，手艺留下来。',
+];
+const FILL = '天地人心手风水山云月日光言语书文刻木铅墨纸版印排拆捡盘归留传承今古年时声色春秋明暗远近来去生长';
+const STEPS = [
+  ['捡字', '从字盘里把字一个个捡出来——字块上的字是反着刻的'],
+  ['上墨', '墨辊滚过去，给每个字块刷上墨'],
+  ['压印', '铺一张纸，压下去，墨印到纸的背面'],
+  ['揭纸', '把纸揭起来翻个面——反字印成了正字'],
+  ['拆版', '字块拆下来放回字盘，等着排下一句'],
+];
+
+let W, H, DPR, S, X0, CW, t = 0;
+let cc, ccols, crows, caseY, stepY, fcell, fx0, fy0, fW, fH, pageX, pageY, pageW, pageH, lineH, maxLines;
+let CASE = [], heat;
+let job = null, pending = [], lines = [], flying = [], scroll = 0;
+let setN = 0, retN = 0, auto = true, sIdx = 0, feedT = .5;
+const rand = (a, b) => a + Math.random() * (b - a);
+const clamp = (v, a = 0, b = 1) => v < a ? a : v > b ? b : v;
+const eio = u => u < .5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+
+function buildCase() { const s = []; for (const ch of SCRIPT.join('') + FILL) if (!s.includes(ch)) s.push(ch); CASE = s; }
+function layout() {
+  DPR = Math.min(devicePixelRatio || 1, 2);
+  W = innerWidth; H = innerHeight; S = Math.min(W / 390, H / 760, 1.5);
+  cv.width = W * DPR; cv.height = H * DPR; ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  CW = Math.min(W - 36, 470 * S); X0 = (W - CW) / 2;
+  stepY = 66 * S;
+  cc = Math.round(13 * S); ccols = Math.floor(CW / cc); crows = Math.ceil(CASE.length / ccols);
+  while (CASE.length < ccols * crows) CASE.push(FILL[CASE.length % FILL.length]);
+  heat = new Float32Array(CASE.length);
+  caseY = stepY + 78 * S;
+  fcell = Math.min((CW - 16) / MAXC, 32 * S);
+  fW = fcell * MAXC + 16; fH = fcell * 2 + 16; fx0 = (W - fW) / 2; fy0 = caseY + crows * cc + 34 * S;
+  pageX = X0; pageW = CW; pageY = fy0 + fH + 40 * S; pageH = H - pageY - 112;
+  lineH = 30 * S; maxLines = Math.max(2, Math.floor((pageH - 22 * S) / lineH));
+  while (lines.length > maxLines) lines.shift();
+  if (job) placeTargets(job);
+}
+const slotPos = k => ({ x: X0 + (k % ccols) * cc + cc / 2, y: caseY + Math.floor(k / ccols) * cc + cc / 2 });
+function slotOf(ch) { let k = CASE.indexOf(ch); if (k < 0) { k = Math.floor(Math.random() * CASE.length); CASE[k] = ch; } return k; }
+
+// 排版台上的位置：整行是镜像排的（第一个字在最右边），翻过来才是正的
+function placeTargets(j) {
+  const n = j.blocks.length, rowsN = n > MAXC ? 2 : 1;
+  j.blocks.forEach((b, i) => {
+    const r = i < MAXC ? 0 : 1, k = r ? i - MAXC : i, m = r ? n - MAXC : Math.min(n, MAXC);
+    const left = fx0 + 8 + (MAXC - m) / 2 * fcell;
+    b.tx = left + (m - 1 - k) * fcell + fcell / 2;
+    b.ty = rowsN === 1 ? fy0 + fH / 2 : fy0 + 8 + r * fcell + fcell / 2;
+  });
+}
+// 印到纸上的位置：把排版台左右翻过来
+const printX = b => 2 * (fx0 + fW / 2) - b.tx;
+function lineLayout(chars) {
+  const fs = Math.min(18 * S, (pageW - 40 * S) / (chars.length * 1.05));
+  return { fs, x: i => pageX + 26 * S + i * fs * 1.05 + fs / 2 };
+}
+const lineY = i => pageY + 20 * S + i * lineH + lineH / 2 + scroll;
+
+// ---------- 一句话的五个步骤 ----------
+function say(text) { const c = Array.from(text.replace(/\s+/g, '')).slice(0, 24); if (c.length) pending.push(c); }
+function startJob(chars) {
+  const blocks = chars.map((ch, i) => { const k = slotOf(ch), p = slotPos(k); heat[k] = 1; return { ch, slot: k, x: p.x, y: p.y, tx: 0, ty: 0, d: i * .08, go: false, ink: 0 }; });
+  job = { chars, blocks, phase: 0, pt: 0, jit: chars.map(() => [rand(-.05, .05), rand(-1.2, 1.2), rand(.72, 1)]) };
+  placeTargets(job);
+}
+const DUR = [null, .75, .7, .8, 1.0];      // 每一步的时长（捡字按字数算）
+function update(dt) {
+  t += dt;
+  scroll *= Math.pow(.004, dt);
+  if (!job) {
+    if (pending.length) startJob(pending.shift());
+    else if (auto) { feedT -= dt; if (feedT <= 0) { say(SCRIPT[sIdx++ % SCRIPT.length]); feedT = 1.2; } }
+  }
+  if (job) {
+    const j = job; j.pt += dt;
+    if (j.phase === 0) {
+      const k = 1 - Math.pow(.0005, dt);
+      for (const b of j.blocks) if (j.pt > b.d) { if (!b.go) { b.go = true; setN++; } b.x += (b.tx - b.x) * k; b.y += (b.ty - b.y) * k; }
+      if (j.pt > j.blocks[j.blocks.length - 1].d + .7) next(j);
+    } else {
+      if (j.phase === 1) { const rx = rollerX(j.pt / DUR[1]); for (const b of j.blocks) if (b.x < rx) b.ink = Math.min(1, b.ink + dt * 6); }
+      if (j.pt >= DUR[j.phase]) next(j);
+    }
+  }
+  for (const f of flying) { f.u += dt / f.dur; if (f.u >= 1 && !f.done) { f.done = true; heat[f.slot] = 1; retN++; } }
+  flying = flying.filter(f => !f.done);
+  for (let i = 0; i < heat.length; i++) if (heat[i] > 0) heat[i] = Math.max(0, heat[i] - dt * .7);
+  document.getElementById('stat').innerHTML = `已排 ${String(setN).padStart(3, '0')} 字<br>已归盘 ${String(retN).padStart(3, '0')} 字`;
+}
+function next(j) {
+  j.phase++; j.pt = 0;
+  if (j.phase === 4) {               // 拆版：字块飞回字盘；纸飞到下面那页
+    if (lines.length >= maxLines) { lines.shift(); scroll += lineH; }
+    j.lineIdx = lines.length;
+    j.blocks.forEach((b, i) => { const p = slotPos(b.slot); flying.push({ ch: b.ch, slot: b.slot, x0: b.x, y0: b.y, x1: p.x, y1: p.y, u: -.15 - i * .035, dur: rand(.8, 1.1) }); });
+  }
+  if (j.phase === 5) { lines.push({ chars: j.chars, jit: j.jit, born: t }); job = null; feedT = 1.2; }
+}
+const rollerX = u => fx0 - 14 + (fW + 28) * eio(clamp(u));
+
+// ---------- 画 ----------
+function label(txt, x, y, right, col) {
+  ctx.font = `400 ${9.5 * S}px ${MONO}`; ctx.fillStyle = col || '#8a8a8a'; ctx.textAlign = right ? 'right' : 'left'; ctx.textBaseline = 'alphabetic';
+  ctx.fillText(txt, x, y); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+}
+function block(x, y, size, ch, o) {
+  const s = size * .88;
+  ctx.fillStyle = o.fill || '#111'; ctx.fillRect(x - s / 2, y - s / 2, s, s);
+  ctx.strokeStyle = o.edge; ctx.lineWidth = 1; ctx.strokeRect(x - s / 2 + .5, y - s / 2 + .5, s - 1, s - 1);
+  ctx.save(); ctx.translate(x, y); ctx.scale(-1, 1);
+  ctx.font = `700 ${size * .6}px ${SERIF}`; ctx.fillStyle = o.ink; ctx.fillText(ch, 0, size * .03); ctx.restore();
+}
+function drawSteps() {
+  const cur = job ? Math.min(4, job.phase) : -1, n = STEPS.length, w = CW / n;
+  ctx.strokeStyle = '#333'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(X0 + w / 2, stepY); ctx.lineTo(X0 + CW - w / 2, stepY); ctx.stroke();
+  STEPS.forEach(([name], i) => {
+    const x = X0 + w * i + w / 2, on = i === cur, done = cur > i;
+    ctx.fillStyle = on ? `rgb(${SIG})` : done ? `rgba(${SIG},.35)` : '#1a1a1a';
+    ctx.beginPath(); ctx.arc(x, stepY, (on ? 11 : 9) * S, 0, 6.283); ctx.fill();
+    if (!on && !done) { ctx.strokeStyle = '#444'; ctx.stroke(); }
+    ctx.fillStyle = on ? '#000' : done ? '#ffd9cc' : '#777'; ctx.font = `700 ${10 * S}px ${MONO}`; ctx.fillText(i + 1, x, stepY + .5);
+    ctx.fillStyle = on ? `rgb(${SIG})` : done ? '#a66' : '#666'; ctx.font = `${on ? 700 : 400} ${12 * S}px ${SERIF}`; ctx.fillText(name, x, stepY + 22 * S);
+  });
+  ctx.fillStyle = '#e8e8e8'; ctx.font = `400 ${12.5 * S}px ${SERIF}`;
+  ctx.fillText(cur >= 0 ? STEPS[cur][1] : '等待下一句…', W / 2, stepY + 44 * S);
+}
+function paperRect() { return { x: fx0 + 3, y: fy0 + 3, w: fW - 6, h: fH - 6 }; }
+function drawPaper(j) {
+  const R = paperRect(), cx = R.x + R.w / 2;
+  ctx.save();
+  if (j.phase === 2) {                               // 纸落下、压下去
+    const u = j.pt / DUR[2], drop = eio(clamp(u / .5)), press = u > .5 ? Math.sin((u - .5) / .5 * Math.PI) : 0;
+    ctx.globalAlpha = drop; ctx.translate(cx, R.y + R.h / 2 - (1 - drop) * 40 * S); ctx.scale(1 - press * .02, 1 - press * .02);
+    paperBack(R, Math.max(0, (u - .55) / .45));
+  } else if (j.phase === 3) {                        // 揭纸：左右翻面
+    const u = eio(j.pt / DUR[3]), sx = Math.cos(u * Math.PI), lift = Math.sin(u * Math.PI);
+    ctx.translate(cx, R.y + R.h / 2 - lift * 14 * S); ctx.scale(Math.max(.002, Math.abs(sx)), 1 + lift * .05);
+    ctx.shadowColor = 'rgba(0,0,0,.6)'; ctx.shadowBlur = 20 * lift;
+    if (u < .5) paperBack(R, 1); else paperFront(j, R, 1);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = `rgba(0,0,0,${(1 - Math.abs(sx)) * .35})`; ctx.fillRect(-R.w / 2, -R.h / 2, R.w, R.h);
+  }
+  ctx.restore();
+}
+function paperBack(R, soak) {                       // 纸的正面：只隐约透出背面的反字
+  ctx.fillStyle = '#ece4d3'; ctx.fillRect(-R.w / 2, -R.h / 2, R.w, R.h);
+  if (soak > 0) for (const b of job.blocks) {
+    ctx.save(); ctx.translate(b.tx - (R.x + R.w / 2), b.ty - (R.y + R.h / 2)); ctx.scale(-1, 1);
+    ctx.font = `700 ${fcell * .6}px ${SERIF}`; ctx.fillStyle = `rgba(120,40,20,${.18 * soak})`; ctx.fillText(b.ch, 0, fcell * .03); ctx.restore();
+  }
+}
+function paperFront(j, R) {                         // 纸的背面（印好的那面）：正字
+  ctx.fillStyle = '#ece4d3'; ctx.fillRect(-R.w / 2, -R.h / 2, R.w, R.h);
+  j.blocks.forEach((b, i) => {
+    const [rot, dy, ink] = j.jit[i];
+    ctx.save(); ctx.translate(printX(b) - (R.x + R.w / 2), b.ty - (R.y + R.h / 2) + dy); ctx.rotate(rot);
+    ctx.font = `700 ${fcell * .6}px ${SERIF}`; ctx.fillStyle = `rgba(28,25,21,${ink})`; ctx.fillText(b.ch, 0, fcell * .03); ctx.restore();
+  });
+}
+function draw() {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  drawSteps();
+
+  // ① 字盘
+  label('字盘 TYPE CASE', X0, caseY - 8 * S); label('字是反刻的', X0 + CW, caseY - 8 * S, true);
+  ctx.font = `400 ${cc * .66}px ${SERIF}`;
+  for (let k = 0; k < CASE.length; k++) {
+    const p = slotPos(k), h = heat[k];
+    ctx.fillStyle = h > .05 ? `rgba(${SIG},${.3 + h * .7})` : 'rgba(255,255,255,.2)';
+    ctx.save(); ctx.translate(p.x, p.y); ctx.scale(-1, 1); ctx.fillText(CASE[k], 0, 0); ctx.restore();
+  }
+
+  // ② 排版台
+  label('排版台 FORME', fx0, fy0 - 8 * S); label('反着排：第一个字在最右边', fx0 + fW, fy0 - 8 * S, true);
+  ctx.strokeStyle = '#bdbdbd'; ctx.lineWidth = 1; ctx.strokeRect(fx0 + .5, fy0 + .5, fW - 1, fH - 1);
+  if (job) {
+    const j = job;
+    const showBlocks = j.phase < 4;
+    if (showBlocks) for (const b of j.blocks) if (b.go)
+      block(b.x, b.y, fcell, b.ch, { edge: b.ink > .1 ? `rgba(${SIG},${.5 + b.ink * .5})` : 'rgba(255,255,255,.45)',
+        ink: b.ink > 0 ? `rgb(${255 - b.ink * 0},${Math.round(236 - b.ink * 159)},${Math.round(236 - b.ink * 208)})` : '#ececec',
+        fill: b.ink > 0 ? `rgba(${40 * b.ink},${8 * b.ink},0,1)` : '#121212' });
+    if (j.phase === 1) {                              // 墨辊
+      const rx = rollerX(j.pt / DUR[1]);
+      ctx.fillStyle = '#2a2a2a'; ctx.fillRect(rx - 6 * S, fy0 - 8 * S, 12 * S, fH + 16 * S);
+      ctx.fillStyle = `rgb(${SIG})`; ctx.fillRect(rx - 1.5 * S, fy0 - 8 * S, 3 * S, fH + 16 * S);
+      ctx.fillStyle = '#666'; ctx.fillRect(rx - 1, fy0 - 26 * S, 2, 18 * S);
+    }
+    if (j.phase === 2 || j.phase === 3) drawPaper(j);
+    if (j.phase === 3 && j.pt / DUR[3] > .45) {
+      ctx.fillStyle = `rgba(${SIG},${clamp((j.pt / DUR[3] - .45) * 4)})`; ctx.font = `700 ${12 * S}px ${SERIF}`;
+      ctx.fillText('↓ 反字翻过来，就是正字', W / 2, fy0 + fH + 20 * S);
+    }
+  }
+
+  // 拆版：字块飞回字盘
+  for (const f of flying) {
+    if (f.u < 0) { block(f.x0, f.y0, fcell, f.ch, { edge: `rgba(${SIG},.7)`, ink: `rgb(${SIG})`, fill: '#1a0600' }); continue; }
+    const u = Math.min(1, f.u), e = eio(u), x = f.x0 + (f.x1 - f.x0) * e, y = f.y0 + (f.y1 - f.y0) * e - Math.sin(u * Math.PI) * 36 * S;
+    block(x, y, fcell + (cc - fcell) * e, f.ch, { edge: `rgba(${SIG},${.8 - .5 * u})`, ink: `rgba(${SIG},${1 - .4 * u})`, fill: 'rgba(0,0,0,.85)' });
+  }
+
+  // ③ 印出来的纸
+  label('印出来 PRINT', pageX, pageY - 8 * S); label('读起来是正的', pageX + pageW, pageY - 8 * S, true, `rgb(${SIG})`);
+  ctx.fillStyle = '#ece4d3'; ctx.fillRect(pageX, pageY, pageW, pageH);
+  ctx.save(); ctx.beginPath(); ctx.rect(pageX, pageY, pageW, pageH); ctx.clip();
+  ctx.strokeStyle = 'rgba(60,45,30,.12)'; ctx.lineWidth = 1;
+  for (let i = 0; i <= maxLines; i++) { const y = pageY + 20 * S + i * lineH + .5; ctx.beginPath(); ctx.moveTo(pageX + 14 * S, y); ctx.lineTo(pageX + pageW - 14 * S, y); ctx.stroke(); }
+  lines.forEach((ln, li) => {
+    const L = lineLayout(ln.chars), y = lineY(li), newest = li === lines.length - 1 && !job;
+    ln.chars.forEach((ch, i) => {
+      const [rot, dy, ink] = ln.jit[i];
+      ctx.save(); ctx.translate(L.x(i), y + dy); ctx.rotate(rot);
+      ctx.font = `700 ${L.fs}px ${SERIF}`; ctx.fillStyle = `rgba(28,25,21,${ink * (newest ? 1 : .75)})`; ctx.fillText(ch, 0, 0); ctx.restore();
+    });
+    if (li === lines.length - 1) { ctx.fillStyle = `rgb(${SIG})`; ctx.fillRect(pageX + 10 * S, y - 6 * S, 4 * S, 12 * S); }
+  });
+  ctx.restore();
+
+  // 纸从排版台飞到下面那页：每个字从纸上的位置流到这一行
+  if (job && job.phase === 4) {
+    const j = job, u = eio(clamp(j.pt / (DUR[4] * .85))), R = paperRect(), L = lineLayout(j.chars), ty = lineY(j.lineIdx);
+    const rx = R.x + (pageX + 6 * S - R.x) * u, ry = R.y + (ty - lineH / 2 - R.y) * u, rw = R.w + (pageW - 12 * S - R.w) * u, rh = R.h + (lineH - R.h) * u;
+    ctx.globalAlpha = 1 - clamp((u - .6) / .4); ctx.fillStyle = '#ece4d3'; ctx.fillRect(rx, ry, rw, rh); ctx.globalAlpha = 1;
+    j.blocks.forEach((b, i) => {
+      const [rot, dy, ink] = j.jit[i];
+      const x = printX(b) + (L.x(i) - printX(b)) * u, y = b.ty + (ty - b.ty) * u, fs = fcell * .6 + (L.fs - fcell * .6) * u;
+      ctx.save(); ctx.translate(x, y + dy); ctx.rotate(rot); ctx.font = `700 ${fs}px ${SERIF}`; ctx.fillStyle = `rgba(28,25,21,${ink})`; ctx.fillText(b.ch, 0, 0); ctx.restore();
+    });
+  }
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+}
+
+// ---------- 输入 ----------
+const send = () => { const el = document.getElementById('txt'), v = el.value.trim(); if (!v) return; say(v); el.value = ''; feedT = 3; };
+document.getElementById('bSend').onclick = send;
+document.getElementById('txt').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); send(); } });
+document.getElementById('bAuto').onclick = e => { auto = !auto; e.currentTarget.classList.toggle('hot', auto); e.currentTarget.textContent = auto ? '自述 ON' : '自述 OFF'; };
+
+let last = performance.now();
+window.__step = (n, dt = 1 / 60) => { for (let i = 0; i < n; i++) update(dt); draw(); };
+window.__pause = false;
+buildCase(); layout();
+let rt; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(layout, 150); });
+(function raf(now) { if (!window.__pause) { const dt = Math.min(.05, (now - last) / 1000); update(dt); draw(); } last = now; requestAnimationFrame(raf); })(performance.now());
+})();
+</script>
+</body>
+</html>
