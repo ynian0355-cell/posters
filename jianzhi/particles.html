@@ -135,32 +135,37 @@ function stage3() {                                   // 展开：一扇一扇�
   dust(2600, () => { const a = rnd() * 6.28, r = 300 + Math.pow(rnd(), 0.6) * 700; return [Math.cos(a) * r, Math.sin(a) * r, gauss() * 300]; }, 0.14);
 }
 
+const VERT = Q.get('v') === '1', NSEAL = +(Q.get('n') || 5);
+// 结印 / 汇聚。VERT=1：整个法阵竖起来正对观众；否则平躺在地上、镜头斜着往下看
 function ring(done, partial, link) {
-  camera.position.set(0, 1500, 1650); camera.lookAt(0, -60, 0);
-  const RR = 380, NS = 8;
-  hairline(circle3(0, 0, 0, RR + 200, true), 0.5, GOLD, 1.0, 0.22);
-  hairline(circle3(0, 0, 0, RR + 186, true, 720).filter((_, i) => i % 6 < 3), 0.35, RED2, 1.0, 0.14);
-  hairline(circle3(0, 0, 0, RR - 160, true), 0.4, GOLD, 1.0, 0.16);
+  const M = VERT ? (u, v, h) => [u, v, h] : (u, v, h) => [u, h, -v];
+  const V3 = (u, v, h = 0) => new THREE.Vector3(...M(u, v, h));
+  if (VERT) { camera.position.set(0, 0, 2250); camera.lookAt(0, 0, 0); }
+  else { camera.position.set(0, 1450, 1500); camera.lookAt(0, -60, 0); }
+  const RR = 300, NS = NSEAL, SEAL = 220, CR = 116;
+  const circ = (cu, cv, r, seg = 360) => Array.from({ length: seg + 1 }, (_, i) => { const a = i / seg * Math.PI * 2; return V3(cu + Math.cos(a) * r, cv + Math.sin(a) * r); });
+  hairline(circ(0, 0, RR + 175), 0.5, GOLD, 1.0, 0.22);
+  hairline(circ(0, 0, RR + 162, 720).filter((_, i) => i % 6 < 3), 0.35, RED2, 1.0, 0.14);
+  hairline(circ(0, 0, RR - 150), 0.4, GOLD, 1.0, 0.16);
+  const at = k => { const a = Math.PI / 2 - k / NS * Math.PI * 2; return [Math.cos(a) * RR, Math.sin(a) * RR]; };
   for (let k = 0; k < NS; k++) {
-    const a = -Math.PI / 2 + k / NS * Math.PI * 2, X = Math.cos(a) * RR, Z = -Math.sin(a) * RR;
-    const st = k < done ? 1 : k === done ? partial : 0;
-    hairline(circle3(X, 0, Z, 122, true), 0.45, GOLD, 1.0, st > 0 ? 0.26 : 0.1);
-    if (st > 0) flower(11000, 230, (x, y, i, r, ang) => (ang > st ? null : [X + x, 0, Z - y]), { size: 1.05 });
-    if (k === done && partial > 0 && partial < 1) {  // 刚落下的那一枚：一缕粒子慢慢升起（不是光柱）
-      dust(700, () => { const h = Math.pow(rnd(), 1.6) * 600, r = rnd() * 60 * (1 - h / 700); const an = rnd() * 6.28; return [X + Math.cos(an) * r, h, Z + Math.sin(an) * r]; }, 0.22);
-    }
+    const [U, Vv] = at(k), st = k < done ? 1 : k === done ? partial : 0;
+    hairline(circ(U, Vv, CR), 0.45, GOLD, 1.0, st > 0 ? 0.26 : 0.1);
+    if (st > 0) flower(11000, SEAL, (x, y, i, r, ang) => (ang > st ? null : M(U + x, Vv + y, 0)), { size: 1.05 });
+    if (k === done && partial > 0 && partial < 1)      // 正在落下的那一枚：一缕粒子慢慢飘起（不是光柱）
+      dust(700, () => { const h = Math.pow(rnd(), 1.6) * 520, r = rnd() * 55 * (1 - h / 600), an = rnd() * 6.28;
+        return VERT ? [U + Math.cos(an) * r, Vv + h * 0.55, Math.sin(an) * r + h * 0.4] : M(U + Math.cos(an) * r, Vv + Math.sin(an) * r, h); }, 0.22);
   }
-  if (link) {
-    const P3 = k => { const a = -Math.PI / 2 + k / NS * Math.PI * 2; return new THREE.Vector3(Math.cos(a) * RR, 0, -Math.sin(a) * RR); };
-    for (let k = 0; k < NS; k++) hairline([P3(k), P3((k + 3) % NS)], 0.3, GOLD, 1.0, 0.2);
-    // 中心：一小团慢慢旋起来的粒子
-    flower(9000, 260, (x, y) => [x, 0, -y], { size: 1.05, alpha: 1.1 });
-    dust(1800, () => { const a = rnd() * 6.28, r = Math.pow(rnd(), 2) * 260, h = Math.pow(rnd(), 2) * 420; return [Math.cos(a) * r, h, Math.sin(a) * r]; }, 0.2);
+  if (link) {                                           // 汇聚：发丝细线连成星形，花心聚起一朵
+    const step = NS === 5 ? 2 : 3;
+    for (let k = 0; k < NS; k++) hairline([V3(...at(k)), V3(...at((k + step) % NS))], 0.3, GOLD, 1.0, 0.2);
+    flower(9000, 240, (x, y) => M(x, y, 0), { size: 1.05, alpha: 1.1 });
+    dust(1500, () => { const a = rnd() * 6.28, r = Math.pow(rnd(), 2) * 240, h = Math.pow(rnd(), 2) * 360; return M(Math.cos(a) * r, Math.sin(a) * r, h); }, 0.18);
   }
-  dust(1600, () => { const a = rnd() * 6.28, r = rnd() * 900; return [Math.cos(a) * r, rnd() * 400, Math.sin(a) * r]; }, 0.1);
+  dust(1600, () => { const a = rnd() * 6.28, r = rnd() * 850; return M(Math.cos(a) * r, Math.sin(a) * r, rnd() * 300 - (VERT ? 150 : 0)); }, 0.1);
 }
-const stage4 = () => ring(Math.floor(PROG * 8), PROG * 8 % 1 || 0.6, false);
-const stage5 = () => ring(8, 1, true);
+const stage4 = () => ring(Math.floor(PROG * NSEAL), PROG * NSEAL % 1 || 0.6, false);
+const stage5 = () => ring(NSEAL, 1, true);
 
 function stage6() {                                   // 显形：粒子旋成涡，从花心往外聚成一整朵
   camera.position.set(0, -200, 2000); camera.lookAt(0, 0, 0);
