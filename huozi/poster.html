@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>活字 · A0 海报</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700&family=Noto+Serif+SC:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+  :root { --sig: #ff4d1c; --paper: #ece4d3; --ink: #e8e8e8; }
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  body { display: flex; align-items: center; justify-content: center; }
+  /* 海报：600 × 848 的版面，按窗口等比缩放 */
+  #P { position: relative; width: 600px; height: 848px; background: #050505; color: var(--ink); overflow: hidden; transform-origin: center;
+       background-image: linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px);
+       background-size: 25px 25px; }
+  .mono { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; }
+  .serif { font-family: "Noto Serif SC", "Songti SC", "SimSun", serif; }
+  .abs { position: absolute; }
+  .top { left: 32px; right: 32px; top: 20px; display: flex; justify-content: space-between; font-size: 9.5px; letter-spacing: .14em; color: rgba(255,255,255,.6);
+         padding-bottom: 9px; border-bottom: 1px solid rgba(255,255,255,.35); }
+  .top b { color: var(--sig); font-weight: 400; }
+  /* 左栏：标题 + 五步 */
+  .title { left: 30px; top: 58px; }
+  .title .big { font-weight: 900; font-size: 96px; line-height: 1.0; letter-spacing: -.02em; color: #f2f2f2; }
+  .title .big span { display: inline-block; transform: scaleX(-1); color: transparent; -webkit-text-stroke: 1.4px var(--sig); }
+  .title .sub { margin-top: 10px; font-weight: 700; font-size: 14.5px; color: var(--sig); letter-spacing: .04em; }
+  .title .meta { margin-top: 12px; font-size: 10.5px; line-height: 1.75; color: rgba(255,255,255,.5); }
+  .badge { left: 32px; top: 342px; width: 222px; }
+  .badge .a { background: var(--sig); color: #000; font-weight: 700; font-size: 15px; padding: 6px 10px; letter-spacing: .04em; }
+  .badge .b { background: var(--paper); color: #111; font-weight: 700; font-size: 10.5px; padding: 4px 10px; }
+  .steps { left: 32px; top: 410px; width: 222px; }
+  .steps .h { font-size: 9px; letter-spacing: .14em; color: rgba(255,255,255,.45); margin-bottom: 8px; }
+  .step { display: flex; gap: 10px; padding: 6px 0; border-top: 1px solid rgba(255,255,255,.14); }
+  .step .n { font-size: 10px; color: var(--sig); width: 18px; flex: none; padding-top: 2px; }
+  .step .t { font-size: 14px; font-weight: 700; color: #f0f0f0; }
+  .step .d { font-size: 9.5px; line-height: 1.55; color: rgba(255,255,255,.55); margin-top: 2px; }
+  /* 右栏：活的排印机 */
+  .machine { left: 272px; top: 58px; width: 296px; height: 622px; border: 1px solid rgba(255,255,255,.4); background: #000; overflow: hidden; }
+  .machine iframe { position: absolute; left: 0; top: -30px; width: 400px; height: 952px; border: 0; transform: scale(.74); transform-origin: 0 0; }
+  .mlab { left: 272px; top: 46px; width: 296px; display: flex; justify-content: space-between; font-size: 8.5px; letter-spacing: .14em; color: rgba(255,255,255,.5); }
+  .mlab b { color: var(--sig); font-weight: 400; }
+  .vert { right: 12px; top: 640px; transform: rotate(90deg); transform-origin: right top; font-size: 8.5px; letter-spacing: .2em; color: rgba(255,255,255,.35); white-space: nowrap; }
+  /* 底栏 */
+  .bot { left: 32px; right: 32px; top: 698px; border-top: 1px solid rgba(255,255,255,.35); }
+  .cnt { left: 32px; top: 714px; }
+  .cnt .k { font-size: 9.5px; letter-spacing: .12em; color: rgba(255,255,255,.5); }
+  .cnt .v { font-size: 40px; font-weight: 700; color: #f0f0f0; margin-top: 6px; line-height: 1; }
+  .cnt .bar { margin-top: 9px; width: 160px; height: 3px; background: var(--sig); }
+  .cnt .s { margin-top: 10px; font-size: 11.5px; font-weight: 700; color: var(--sig); }
+  .poem { left: 214px; top: 716px; font-size: 11.5px; line-height: 1.75; color: rgba(255,255,255,.72); }
+  .qr { right: 32px; top: 708px; text-align: right; }
+  .qr .k { font-size: 9px; letter-spacing: .12em; color: rgba(255,255,255,.5); margin-bottom: 6px; }
+  .qr svg { display: block; width: 92px; height: 92px; margin-left: auto; }
+  .hint { left: 32px; bottom: 18px; font-size: 11px; color: rgb(255,120,100); }
+  .size { right: 32px; bottom: 18px; font-size: 9px; letter-spacing: .1em; color: rgba(255,255,255,.35); }
+</style>
+</head>
+<body>
+<div id="P">
+  <div class="abs top mono"><span>INTANGIBLE CULTURAL HERITAGE / NEW MEDIA</span><span>SELF-PORTRAIT <b>NO.06</b> — 2026</span></div>
+
+  <div class="abs title serif">
+    <div class="big"><span>活</span>字</div>
+    <div class="big">印刷</div>
+    <div class="sub">{ 非遗新生计划 · 一句话的自画像 }</div>
+    <div class="meta mono">→ 创造者：胡奕君 + AI CREATE<br>→ 制造日：2026/11/18</div>
+  </div>
+  <div class="abs badge"><div class="a mono">MOVABLE TYPE</div><div class="b serif">中国木活字印刷技术 · 人类非遗</div></div>
+
+  <div class="abs steps serif">
+    <div class="h mono">PROCESS / 一句话的五步</div>
+    <div class="step"><div class="n mono">01</div><div><div class="t">捡字</div><div class="d">从字盘里一个个捡出来，字是反刻的</div></div></div>
+    <div class="step"><div class="n mono">02</div><div><div class="t">上墨</div><div class="d">墨辊滚过，给每个字块刷上墨</div></div></div>
+    <div class="step"><div class="n mono">03</div><div><div class="t">压印</div><div class="d">铺纸，压下去，墨印到纸背</div></div></div>
+    <div class="step"><div class="n mono">04</div><div><div class="t">揭纸</div><div class="d">翻过来，反字成了正字</div></div></div>
+    <div class="step" style="border-bottom:1px solid rgba(255,255,255,.14)"><div class="n mono">05</div><div><div class="t">拆版</div><div class="d">字块回到盘里，等下一句</div></div></div>
+  </div>
+
+  <div class="abs mlab mono"><span>LIVE / 排印机</span><b>● 正在排印</b></div>
+  <div class="abs machine"><iframe id="F" src="index.html" title="活字排印机"></iframe></div>
+  <div class="abs vert mono">PICK · INK · PRESS · LIFT · RETURN — 006</div>
+
+  <div class="abs bot"></div>
+  <div class="abs cnt"><div class="k mono">PRINTED / 已排</div><div class="v mono" id="cn">000</div><div class="bar"></div><div class="s serif">● 字 CHARACTERS</div></div>
+  <div class="abs poem serif">字是反的，印出来才是正的；<br>一句话会散，<br>手艺留下来。</div>
+  <div class="abs qr"><div class="k mono">SCAN / 扫码体验</div><div id="qrbox"></div></div>
+  <div class="abs hint serif">扫码，输入一句你的话，看它被反着排、再正着印出来</div>
+  <div class="abs size mono">A0 · 841 × 1189 MM</div>
+</div>
+<script>
+// 海报按窗口等比缩放
+function fit() { const k = Math.min(innerWidth / 600, innerHeight / 848); document.getElementById('P').style.transform = `scale(${k})`; }
+addEventListener('resize', fit); fit();
+// 排印机里只留画面：藏起它自己的标题栏和输入框；"已排"数字同步到海报
+const F = document.getElementById('F');
+F.addEventListener('load', () => {
+  try {
+    const d = F.contentDocument, st = d.createElement('style');
+    st.textContent = '.ui .top,.ui .ctrl{display:none!important}';
+    d.head.appendChild(st);
+    setInterval(() => { const s = d.getElementById('stat'); const m = s && s.textContent.match(/已排\s*(\d+)/); if (m) document.getElementById('cn').textContent = m[1]; }, 200);
+  } catch (_) {}
+});
+</script>
+</body>
+</html>
