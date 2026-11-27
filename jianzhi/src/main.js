@@ -341,7 +341,8 @@ function analyze(P) {
   const pinch = D(P, 4, 8) / palm < 0.3 && D(P, 8, 0) / palm > 1.1;     // 食指尖离手腕够远，才是捏，不是握拳
   const count = ext.filter(Boolean).length + (thumb ? 1 : 0);
   const roll = Math.atan2((P[9][0] - P[0][0]) * CAM.ar, -(P[9][1] - P[0][1]));
-  return { palm, count, fist: count === 0 && !pinch, open: count >= 4 && !pinch, pinch, roll };
+  const nf = ext.filter(Boolean).length;                 // 四根手指伸出几根（不管大拇指，拇指识别最不稳）
+  return { palm, count, fist: nf === 0 && !pinch, one: ext[0] && !ext[1] && !ext[2] && !ext[3] && !pinch, open: nf >= 3 && !pinch, pinch, roll };
 }
 // 摄像头画面中间一块 → 海报（手不用伸到画面边上）
 function toWorld(p) { return [((p[0] - 0.15) / 0.7 - 0.5) * VIS_W, -((p[1] - 0.1) / 0.8 - 0.5) * VIS_H, 0]; }
@@ -356,7 +357,7 @@ const G = {
 };
 function progress() { G.progressT = 0; }
 
-function gestureKey(h) { return h.pinch ? 'pinch' : h.fist ? 'fist' : 'n' + h.count; }
+function gestureKey(h) { return h.pinch ? 'pinch' : h.fist ? 'fist' : h.one ? 'one' : 'n' + h.count; }
 
 function interact(h, dt) {
   const key = gestureKey(h);
@@ -373,7 +374,7 @@ function interact(h, dt) {
     if (h.open) { if (S.charge > 0.12) { setMode('BURST'); S.open = 0; progress(); } else setMode('AWAKE'); }
   } else if (m === 'BLOOM' || m === 'SEAL') {
     // 04 结印：竖起一根手指并保持住，小团花一朵接一朵慢慢出现（每 0.8 秒一朵）；放下手指就停在那里
-    if (held('n1', 0.2) && S.seals < NS) {
+    if (held('one', 0.2) && S.seals < NS) {
       G.sealClock = (G.sealClock || 0) + dt;
       if (S.mode !== 'SEAL') { setMode('SEAL'); G.sealClock = 0; progress(); }
       if (G.sealClock >= 0.4) { G.sealClock = 0; S.seals++; S.sealT[S.seals - 1] = 0; progress(); }
@@ -448,13 +449,27 @@ function hintFor() {
   return HINTS[S.mode] || '';
 }
 
+// ---------- 备用：手指 / 鼠标（扫码在手机上玩、或者摄像头出问题时）----------
+//  按住 = 做这一步的动作，松开 = 下一步。摄像头看到手时，手势优先。
+const TOUCH = { down: false, last: -99 };
+function touchGesture() {
+  const m = S.mode, d = TOUCH.down;
+  const g = (k) => ({ palm: 1, count: k === 'open' ? 5 : 0, fist: k === 'fist', one: k === 'one', open: k === 'open', pinch: k === 'pinch', roll: 0 });
+  if (!d) return g('open');
+  if (m === 'BLOOM' || m === 'SEAL') return g(S.seals < NS ? 'one' : 'pinch');
+  if (m === 'GATHER' || m === 'REVEAL') return g('pinch');
+  return g('fist');
+}
+const TOUCH_HINT = { WAIT: '按住屏幕', AWAKE: '按住屏幕', CHARGE: '松手', BURST: '', BLOOM: '再按住不放', GATHER: '松手', REVEAL: '', HOLD: '按住，重新开始' };
 function direct(dt) {
-  const P = readHand();
-  const near = P && D(P, 0, 9) > CFG.MIN_PALM;
+  let P = readHand();
+  let near = P && D(P, 0, 9) > CFG.MIN_PALM;
+  const touching = !near && (TOUCH.down || T - TOUCH.last < 4);
+  if (touching) { near = true; P = null; }
   if (near) { G.handT += dt; G.absentT = 0; } else { G.handT = 0; G.absentT += dt; }
   // 手的点：一直淡淡跟着
   const hp = handPts.geometry.attributes.position, ha = handPts.geometry.attributes.alpha;
-  if (near && !G.demo) {
+  if (near && P && !G.demo) {
     const W = P.map(toWorld);
     const palmW = Math.hypot(W[9][0] - W[0][0], W[9][1] - W[0][1]);
     S.hand = W; S.handScale = palmW / 178;
@@ -468,11 +483,11 @@ function direct(dt) {
   }
   // 互动中
   G.progressT += dt;
-  if (near) interact(analyze(P), dt);
+  if (near) interact(P ? analyze(P) : touchGesture(), dt);
   else S.hand = null;
   autoAdvance(dt);
   if (G.absentT > CFG.ABSENT_TO_DEMO || G.progressT > CFG.IDLE_TO_DEMO) { G.demo = true; G.demoT = 0; reset(); setMode('WAIT'); }
-  G.hint = near ? hintFor() : '把手举到镜头前';
+  G.hint = !near ? (CAM.on ? '把手举到镜头前，或按住屏幕' : '按住屏幕') : P ? hintFor() : (S.mode === 'SEAL' ? (S.seals < NS ? '按住不放……' : '松手，再按一下') : TOUCH_HINT[S.mode] || '');
   G.hintStrong = G.progressT > CFG.HINT_AFTER;
 }
 
@@ -509,7 +524,16 @@ function loop(now) {
   requestAnimationFrame(loop);
 }
 
+// 手指 / 鼠标
+const tDown = e => { TOUCH.down = true; TOUCH.last = T; e.preventDefault(); };
+const tUp = () => { TOUCH.down = false; TOUCH.last = T; };
+window.addEventListener('pointerdown', tDown, { passive: false });
+window.addEventListener('pointerup', tUp); window.addEventListener('pointercancel', tUp);
+window.addEventListener('contextmenu', e => e.preventDefault());
+// 展览：F 键或双击 = 全屏
+window.addEventListener('dblclick', () => { if (!document.fullscreenElement) document.documentElement.requestFullscreen?.(); });
 window.addEventListener('keydown', e => {
+  if (e.key === 'f' || e.key === 'F') { if (!document.fullscreenElement) document.documentElement.requestFullscreen?.(); else document.exitFullscreen?.(); }
   if (e.key === 'd' || e.key === 'D') { G.forceDemo = !G.demo ? true : false; G.demo = !G.demo; G.demoT = 0; reset(); setMode('WAIT'); }
   if (e.key === 'h' || e.key === 'H') document.body.classList.toggle('clean');
   if (e.key === 's' || e.key === 'S') { const a = document.createElement('a'); a.download = 'jianzhi.png'; a.href = renderer.domElement.toDataURL('image/png'); a.click(); }
@@ -519,6 +543,7 @@ window.addEventListener('keydown', e => {
 window.__jz = {
   S, G, CFG,
   inject(P) { CAM.inject = P; },
+  touch(d) { d ? (TOUCH.down = true, TOUCH.last = T) : (TOUCH.down = false, TOUCH.last = T); },
   analyze: P => analyze(P),
   handPose: (ext, pinch, roll = 0, cx = 0.5, cy = 0.62, size = 0.22) => {   // 造一只手（0..1 坐标，已镜像）
     const P = HAND0.map(p => p.slice()), F = [[5,6,7,8],[9,10,11,12],[13,14,15,16],[17,18,19,20]];
