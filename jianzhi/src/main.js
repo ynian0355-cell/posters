@@ -32,7 +32,7 @@ const CFG = {
   MIN_PALM: 0.07,       // 手掌（手腕到中指根）至少占画面高度多少，太远的手不算
 };
 const Q = new URLSearchParams(location.search);
-const NB = 820, NL = 80, N = 16 * (NB + NL);          // 原版：1/16 扇形里 620 个纸点 + 70 个镂空光点，折 16 次
+const NB = 1000, NL = 90, N = 16 * (NB + NL);          // 原版：1/16 扇形里 620 个纸点 + 70 个镂空光点，折 16 次
 const ASPECT = 848 / 600;
 const SZ = 730, SEAL = 200, RR = 260, NS = 5, CAMZ = 2000, FOV = 38;
 const VIS_H = 2 * CAMZ * Math.tan(FOV / 2 * Math.PI / 180), VIS_W = VIS_H / ASPECT;
@@ -225,18 +225,17 @@ function target(i, out, T) {
 function released(i) { return SR[i] * 0.85 + R3[i] * 0.15 < S.reveal * 1.08; }
 // 04 结印 / 05 汇聚 时每颗粒子的位置
 function sealTarget(i, m, a) {
-  const g = GRP[i];
+  const g = GRP[i], e = m === 'GATHER' ? smooth(S.gather) : 0;
   const slot = k => { const ang = Math.PI / 2 - k / NS * Math.PI * 2; return [Math.cos(ang) * RR, Math.sin(ang) * RR]; };
-  if (g < NS && (m === 'GATHER' || g < S.seals)) {       // 已经落位的小团花（粒子从中间飞过去聚成）
+  const cx = SX[i] * SEAL * 1.35, cy = SY[i] * SEAL * 1.35;   // 中间那一朵（汇聚后才出现）
+  if (g < NS && (m === 'GATHER' || g < S.seals)) {       // 04 结印：小团花一朵一朵从大团花里飞出来落位
     const [X, Y] = slot(g), pulse = S.sealT[g] < 2 ? Math.exp(-S.sealT[g] * 4) : 0;
-    return [X + SX[i] * SEAL, Y + SY[i] * SEAL, a * (1 + 0.8 * pulse)];
+    const px = X + SX[i] * SEAL, py = Y + SY[i] * SEAL;  // 05 汇聚：五朵一起往中间集结，合成中间那一朵
+    return [px + (cx - px) * e, py + (cy - py) * e, a * (1 + 0.8 * pulse) * (1 - 0.78 * e)];   // 叠到中间后变淡，不过曝
   }
-  if (m === 'GATHER') {                                  // 05 汇聚：中间聚起一朵；一部分粒子连成五角星的细线
-    if (R1[i] < 0.35) { const k = Math.floor(R2[i] * NS), [ax, ay] = slot(k), [bx, by] = slot((k + 2) % NS), t = R3[i];
-      return [ax + (bx - ax) * t, ay + (by - ay) * t, 0.09 * S.gather]; }
-    return [SX[i] * SEAL * 1.35, SY[i] * SEAL * 1.35, a * 0.9 * S.gather + a * 0.25];
-  }
-  return [SX[i] * SZ * 0.5, SY[i] * SZ * 0.5, a * 0.33];   // 还没出来的：中间一朵很淡的小团花
+  if (m === 'GATHER') return [cx, cy, a * e];            // 中间这一朵：五朵到了中间才显出来
+  const t = fanTarget(i, Math.PI * 2, 1);                // 还没飞出来的：留在大团花原位，慢慢淡掉
+  return [t[0], t[1], 0];
 }
 function __unused() {
 }
@@ -398,7 +397,7 @@ function autoAdvance(dt) {
   const m = S.mode;
   for (let k = 0; k < NS; k++) S.sealT[k] += dt;
   if (m === 'BURST') { S.open = Math.min(1, S.open + dt / 1.5); if (S.open >= 1) setMode('BLOOM'); }
-  if (m === 'GATHER') S.gather = Math.min(1, S.gather + dt / 1.3);
+  if (m === 'GATHER') S.gather = Math.min(1, S.gather + dt / 2.0);
   if (m === 'REVEAL' && G.autoReveal) { S.reveal = Math.min(1, S.reveal + dt / 2.6); }
   if (m === 'REVEAL' && S.reveal >= 1) { setMode('HOLD'); G.autoReveal = false; progress(); }
   if (m === 'REVEAL' && !G.autoReveal) S.twist += dt * 0.15 * Math.sign(S.twist || 1);
