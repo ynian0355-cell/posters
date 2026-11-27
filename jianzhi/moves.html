@@ -25,21 +25,24 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
 const Q = new URLSearchParams(location.search);
-const STAGE = +(Q.get('s') || 6), PROG = +(Q.get('p') || 0.6);
-const W = +(Q.get('w') || 600), H = Math.round(W * 848 / 600), DPR = window.devicePixelRatio || 1;
+let STAGE = +(Q.get('s') || 6), PROG = +(Q.get('p') || 0.6), TT = 0;
+const W = +(Q.get('w') || 600), H_ = Math.round(W * 848 / 600), DPR = window.devicePixelRatio || 1;
 
 let seed = 11 + STAGE * 97;
 const rnd = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
 const gauss = () => (rnd() + rnd() + rnd() - 1.5) / 1.5;
+// 每颗粒子固定的随机数（做动画时每一帧都一样，粒子不会闪）
+const H = (i, k) => { let t = Math.imul(i * 7919 + k * 104729 + 1013904223, 2654435761) ^ 0x5bd1e995; t ^= t >>> 15; t = Math.imul(t, 2246822519); t ^= t >>> 13; return (t >>> 0) / 4294967296; };
+const HG = (i, k) => (H(i, k) + H(i, k + 1) + H(i, k + 2) - 1.5) / 1.5;
 const ease = x => x < 0 ? 0 : x > 1 ? 1 : 1 - Math.pow(1 - x, 3);
 const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-renderer.setPixelRatio(DPR); renderer.setSize(W, H);
+renderer.setPixelRatio(DPR); renderer.setSize(W, H_);
 document.body.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x060609);
-const camera = new THREE.PerspectiveCamera(38, W / H, 1, 20000);
+const camera = new THREE.PerspectiveCamera(38, W / H_, 1, 20000);
 
 // ---------- 团花取样：纸上的位置 + 刀口（边缘）多撒一些，花纹才清楚 ----------
 async function patternPixels(size) {
@@ -69,7 +72,7 @@ for (let i = 0; i < 400000 && HOLES.length < 14000; i++) { const u = rnd(), v = 
 const B = { p: [], c: [], s: [], a: [] };
 function dot(x, y, z, col, size, alpha) { B.p.push(x, y, z); B.c.push(col[0], col[1], col[2]); B.s.push(size); B.a.push(alpha); }
 const RED = [0.95, 0.05, 0.07], RED2 = [1.0, 0.16, 0.13], GOLD = [1.0, 0.68, 0.36], CYAN = [0.47, 0.9, 1.0], PALE = [1.0, 0.88, 0.74];
-function pick() { const k = rnd(); return k < 0.8 ? RED : k < 0.97 ? RED2 : k < 0.995 ? GOLD : PALE; }
+function pick(k) { return k < 0.8 ? RED : k < 0.97 ? RED2 : k < 0.995 ? GOLD : PALE; }
 
 // 一朵粒子团花。place(x,y,i) -> [X,Y,Z] 或 null（不画）；默认就是平放在 xy 平面
 function flower(n, S, place, o = {}) {
@@ -81,8 +84,8 @@ function flower(n, S, place, o = {}) {
     if (o.reveal !== undefined && r > o.reveal) continue;
     const q = place ? place(x * S, y * S, i, r, ang) : [x * S, y * S, 0];
     if (!q) continue;
-    const c = e ? (rnd() < 0.08 ? GOLD : RED2) : pick();
-    dot(q[0], q[1], q[2], c, (e ? 1.6 : 1.25) * (o.size || 1) * (0.7 + rnd() * 0.6), (e ? 0.55 : 0.32) * (o.alpha ?? 1) * (q[3] ?? 1));
+    const c = e ? (H(i, 1) < 0.08 ? GOLD : RED2) : pick(H(i, 2));
+    dot(q[0], q[1], q[2], c, (e ? 1.6 : 1.25) * (o.size || 1) * (0.7 + H(i, 3) * 0.6), (e ? 0.55 : 0.32) * (o.alpha ?? 1) * (q[3] ?? 1));
   }
   // 镂空处透出来的光：绿 60%、青 40%（原版配色）
   const hs = Math.max(1, Math.floor(HOLES.length / (n * 0.16)));
@@ -121,7 +124,7 @@ function stage2() {                                   // 缠绕：细细的粒�
   for (let k = 0; k < NR; k++) {
     const a0 = k / NR * Math.PI * 2, turns = 1.5 + rnd() * 0.4, h0 = -360 + rnd() * 60, h1 = 380 + rnd() * 220, sp = PROG;
     for (let i = 0; i < 4200; i++) {
-      const s = Math.pow(rnd(), 0.8), a = a0 + s * turns * Math.PI * 2 * (0.6 + sp);
+      const s = Math.pow(rnd(), 0.8), a = a0 + s * turns * Math.PI * 2 * (0.6 + sp) + TT * 0.9;
       const rad = (240 - 110 * sp) * (0.5 + 0.6 * Math.sin(Math.PI * s)) + 30 + gauss() * 7;
       const y = cy + h0 + (h1 - h0) * s * (0.5 + sp * 0.6) + gauss() * 5;
       dot(Math.cos(a) * rad, y, Math.sin(a) * rad, rnd() < 0.85 ? RED : GOLD, 1.1 + rnd() * 0.8, 0.28 * Math.pow(1 - s, 0.6));
@@ -136,10 +139,10 @@ function stage3() {                                   // 展开：一扇一扇�
   flower(70000, 640, null, { wipe });
   // 正在扫开的那条边上，粒子还在往外飞
   for (let i = 0; i < 9000; i++) {
-    const [x, y] = SAMPLES[(rnd() * SAMPLES.length) | 0];
+    const [x, y] = SAMPLES[(H(i, 11) * SAMPLES.length) | 0];
     const ang = Math.atan2(x, y) / (Math.PI * 2) + 0.5;
     if (ang < wipe || ang > wipe + 0.18) continue;
-    const k = (ang - wipe) / 0.18, out = 1 + k * 0.5 + rnd() * 0.15, dz = k * 300 * (rnd() - 0.3);
+    const k = (ang - wipe) / 0.18, out = 1 + k * 0.5 + H(i, 12) * 0.15, dz = k * 300 * (H(i, 13) - 0.3);
     for (let t = 0; t < 4; t++) {                     // 4 个点排成一小段 = 淡淡的拖影
       const f = out - t * 0.025 * k;
       dot(x * 640 * f, y * 640 * f, dz, RED2, 1.1, 0.22 * (1 - k) * (1 - t / 4));
@@ -148,28 +151,30 @@ function stage3() {                                   // 展开：一扇一扇�
   dust(2600, () => { const a = rnd() * 6.28, r = 300 + Math.pow(rnd(), 0.6) * 700; return [Math.cos(a) * r, Math.sin(a) * r, gauss() * 300]; }, 0.14);
 }
 
-const VERT = Q.get('v') === '1';
+const VERT = Q.get('v') !== '0';
 function ring(done, partial, link) {
   const start = B.p.length;
   camera.position.set(0, 1500, 1650); camera.lookAt(0, -60, 0);
-  const RR = 380, NS = 8;
+  const RR = 380, NS = 5, SEAL = 290, CR = 150;
   hairline(circle3(0, 0, 0, RR + 200, true), 0.5, GOLD, 1.0, 0.22);
   hairline(circle3(0, 0, 0, RR + 186, true, 720).filter((_, i) => i % 6 < 3), 0.35, RED2, 1.0, 0.14);
   hairline(circle3(0, 0, 0, RR - 160, true), 0.4, GOLD, 1.0, 0.16);
   for (let k = 0; k < NS; k++) {
-    const a = -Math.PI / 2 + k / NS * Math.PI * 2, X = Math.cos(a) * RR, Z = -Math.sin(a) * RR;
+    const a = Math.PI / 2 - k / NS * Math.PI * 2, X = Math.cos(a) * RR, Z = -Math.sin(a) * RR;   // 第一朵在正上方，顺时针
     const st = k < done ? 1 : k === done ? partial : 0;
-    hairline(circle3(X, 0, Z, 122, true), 0.45, GOLD, 1.0, st > 0 ? 0.26 : 0.1);
-    if (st > 0) flower(11000, 230, (x, y, i, r, ang) => (ang > st ? null : [X + x, 0, Z - y]), { size: 1.05 });
+    hairline(circle3(X, 0, Z, CR, true), 0.45, GOLD, 1.0, st > 0 ? 0.26 : 0.1);
+    if (st > 0) flower(15000, SEAL, (x, y, i, r, ang) => (ang > st ? null : [X + x, 0, Z - y]), { size: 1.05 });
     if (k === done && partial > 0 && partial < 1) {  // 刚落下的那一枚：一缕粒子慢慢升起（不是光柱）
-      dust(700, () => { const h = Math.pow(rnd(), 1.6) * 600, r = rnd() * 60 * (1 - h / 700); const an = rnd() * 6.28; return [X + Math.cos(an) * r, h, Z + Math.sin(an) * r]; }, 0.22);
+      seed = 300 + k; dust(700, () => { const h = Math.pow(rnd(), 1.6) * 600, r = rnd() * 60 * (1 - h / 700); const an = rnd() * 6.28; return [X + Math.cos(an) * r, h, Z + Math.sin(an) * r]; }, 0.22);
     }
   }
+  seed = 555;
   if (link) {
-    const P3 = k => { const a = -Math.PI / 2 + k / NS * Math.PI * 2; return new THREE.Vector3(Math.cos(a) * RR, 0, -Math.sin(a) * RR); };
-    for (let k = 0; k < NS; k++) hairline([P3(k), P3((k + 3) % NS)], 0.3, GOLD, 1.0, 0.2);
+    const la = typeof link === 'number' ? link : 1;
+    const P3 = k => { const a = Math.PI / 2 - k / NS * Math.PI * 2; return new THREE.Vector3(Math.cos(a) * RR, 0, -Math.sin(a) * RR); };
+    for (let k = 0; k < NS; k++) hairline([P3(k), P3((k + 2) % NS)], 0.3, GOLD, 1.0, 0.2 * la);
     // 中心：一小团慢慢旋起来的粒子
-    flower(9000, 260, (x, y) => [x, 0, -y], { size: 1.05, alpha: 1.1 });
+    flower(12000, 300, (x, y) => [x, 0, -y], { size: 1.05, alpha: 1.1 * la });
     dust(1800, () => { const a = rnd() * 6.28, r = Math.pow(rnd(), 2) * 260, h = Math.pow(rnd(), 2) * 420; return [Math.cos(a) * r, h, Math.sin(a) * r]; }, 0.2);
   }
   dust(1600, () => { const a = rnd() * 6.28, r = rnd() * 900; return [Math.cos(a) * r, rnd() * 400, Math.sin(a) * r]; }, 0.1);
@@ -178,49 +183,58 @@ function ring(done, partial, link) {
     camera.position.set(0, 0, 2300); camera.lookAt(0, 0, 0);
   }
 }
-const stage4 = () => ring(Math.floor(PROG * 8), PROG * 8 % 1 || 0.6, false);
-const stage5 = () => ring(8, 1, true);
+const stage4 = () => ring(Math.floor(PROG * 5), PROG * 5 % 1, false);
+const stage5 = () => ring(5, 1, Math.max(0.001, PROG));
 
 function stage6() {                                   // 显形：粒子旋成涡，从花心往外聚成一整朵
   camera.position.set(0, -200, 2000); camera.lookAt(0, 0, 0);
   const SZ = 1100, P = PROG, reveal = clamp((P - 0.15) / 0.75);
   flower(110000, SZ, (x, y, i, r) => {
-    const d = r * 0.8 + rnd() * 0.12;
+    const d = r * 0.8 + H(i, 21) * 0.12;
     const k = ease(clamp((P - d * 0.7) / 0.4));
     if (k >= 0.999) return [x, y, 0];
     const ta = Math.atan2(y, x), rt = r * SZ / 2;
-    const far = (1 - k) * (300 + 1100 * Math.pow(rnd(), 1.2));
-    const arm = Math.floor(rnd() * 3) * Math.PI * 2 / 3, aw = Math.atan2(Math.sin(ta - arm), Math.cos(ta - arm));
-    const a = ta - aw * clamp(far / 700) * 0.9 + far / 400 + gauss() * 0.06, rr = rt + far;
-    return [Math.cos(a) * rr, Math.sin(a) * rr * 0.86, (1 - k) * gauss() * 160, 0.35 + 0.65 * k];
+    const far = (1 - k) * (300 + 1100 * Math.pow(H(i, 22), 1.2));
+    const arm = Math.floor(H(i, 23) * 3) * Math.PI * 2 / 3, aw = Math.atan2(Math.sin(ta - arm), Math.cos(ta - arm));
+    const a = ta - aw * clamp(far / 700) * 0.9 + far / 400 + HG(i, 24) * 0.06 + (1 - k) * TT * 0.25, rr = rt + far;
+    return [Math.cos(a) * rr, Math.sin(a) * rr * 0.86, (1 - k) * HG(i, 27) * 160, 0.35 + 0.65 * k];
   });
   dust(2500, () => { const arm = Math.floor(rnd() * 3) * 2.094, r = 500 + rnd() * 1300; const a = arm + r / 400 + gauss() * 0.3; return [Math.cos(a) * r, Math.sin(a) * r * 0.86, gauss() * 200]; }, 0.14);
 }
 
-({ 2: stage2, 3: stage3, 4: stage4, 5: stage5, 6: stage6 })[STAGE]();
-// 放进原版海报的版式：整体缩小一点、团花中心放在 52% 高处，避开标题和底栏
-camera.zoom = +(Q.get('zoom') || (VERT && (STAGE === 4 || STAGE === 5) ? 0.7 : ({ 2: 0.66, 6: 0.72 }[STAGE] || 0.78))); camera.setViewOffset(W, H, 0, -17, W, H); camera.updateProjectionMatrix();
-
-// ---------- 画出来 ----------
-const g = new THREE.BufferGeometry();
-g.setAttribute('position', new THREE.Float32BufferAttribute(B.p, 3));
-g.setAttribute('color', new THREE.Float32BufferAttribute(B.c, 3));
-g.setAttribute('size', new THREE.Float32BufferAttribute(B.s, 1));
-g.setAttribute('alpha', new THREE.Float32BufferAttribute(B.a, 1));
-scene.add(new THREE.Points(g, new THREE.ShaderMaterial({
+// ---------- 画出来（可以一帧一帧地画：window.__frame(招式, 进度, 时间)） ----------
+const mat = new THREE.ShaderMaterial({
   transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-  uniforms: { k: { value: H * DPR / 1000 } },
+  uniforms: { k: { value: H_PX() } },
   vertexShader: `attribute float size, alpha; attribute vec3 color; uniform float k; varying vec3 vC; varying float vA;
     void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.); gl_Position = projectionMatrix * mv;
       float ps = size * k * 1500. / -mv.z; gl_PointSize = max(ps, 1.0); vC = color; vA = alpha * min(1., ps * ps); }`,
   fragmentShader: `varying vec3 vC; varying float vA;
     void main(){ float d = length(gl_PointCoord - .5) * 2.; float a = exp(-d * d * 3.5) * vA * 2.6; if (a < 0.003) discard; gl_FragColor = vec4(vC, a); }`
-})));
+});
+function H_PX() { return H_ * DPR / 1000; }
+const pts = new THREE.Points(new THREE.BufferGeometry(), mat); pts.frustumCulled = false; scene.add(pts);
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
-composer.addPass(new UnrealBloomPass(new THREE.Vector2(W * DPR, H * DPR), 0.35, 0.7, 0.55));
+composer.addPass(new UnrealBloomPass(new THREE.Vector2(W * DPR, H_ * DPR), 0.35, 0.7, 0.55));
 composer.addPass(new OutputPass());
-composer.render();
+window.__frame = (s, p, t = 0) => {
+  STAGE = s; PROG = p; TT = t; seed = 11 + s * 97;
+  B.p.length = 0; B.c.length = 0; B.s.length = 0; B.a.length = 0;
+  camera.clearViewOffset(); camera.zoom = 1;
+  ({ 2: stage2, 3: stage3, 4: stage4, 5: stage5, 6: stage6 })[s]();
+  // 放进原版海报的版式：整体缩小一点、团花中心放在 52% 高处，避开标题和底栏
+  camera.zoom = +(Q.get('zoom') || (VERT && (s === 4 || s === 5) ? 0.7 : ({ 2: 0.66, 6: 0.72 }[s] || 0.78)));
+  camera.setViewOffset(W, H_, 0, -17, W, H_); camera.updateProjectionMatrix();
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(B.p, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(B.c, 3));
+  g.setAttribute('size', new THREE.Float32BufferAttribute(B.s, 1));
+  g.setAttribute('alpha', new THREE.Float32BufferAttribute(B.a, 1));
+  pts.geometry.dispose(); pts.geometry = g;
+  composer.render();
+};
+window.__frame(STAGE, PROG, 0);
 window.__done = true;
 </script>
 </body>
