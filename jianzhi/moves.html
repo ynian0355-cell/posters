@@ -148,7 +148,9 @@ function stage3() {                                   // 展开：一扇一扇�
   dust(2600, () => { const a = rnd() * 6.28, r = 300 + Math.pow(rnd(), 0.6) * 700; return [Math.cos(a) * r, Math.sin(a) * r, gauss() * 300]; }, 0.14);
 }
 
+const VERT = Q.get('v') === '1';
 function ring(done, partial, link) {
+  const start = B.p.length;
   camera.position.set(0, 1500, 1650); camera.lookAt(0, -60, 0);
   const RR = 380, NS = 8;
   hairline(circle3(0, 0, 0, RR + 200, true), 0.5, GOLD, 1.0, 0.22);
@@ -171,6 +173,10 @@ function ring(done, partial, link) {
     dust(1800, () => { const a = rnd() * 6.28, r = Math.pow(rnd(), 2) * 260, h = Math.pow(rnd(), 2) * 420; return [Math.cos(a) * r, h, Math.sin(a) * r]; }, 0.2);
   }
   dust(1600, () => { const a = rnd() * 6.28, r = rnd() * 900; return [Math.cos(a) * r, rnd() * 400, Math.sin(a) * r]; }, 0.1);
+  if (VERT) {                                        // 竖起来正对观众：把"地面"转成面向你的平面，效果不变
+    for (let j = start; j < B.p.length; j += 3) { const y = B.p[j + 1], z = B.p[j + 2]; B.p[j + 1] = -z; B.p[j + 2] = y * 0.25; }
+    camera.position.set(0, 0, 2300); camera.lookAt(0, 0, 0);
+  }
 }
 const stage4 = () => ring(Math.floor(PROG * 8), PROG * 8 % 1 || 0.6, false);
 const stage5 = () => ring(8, 1, true);
@@ -193,7 +199,7 @@ function stage6() {                                   // 显形：粒子旋成�
 
 ({ 2: stage2, 3: stage3, 4: stage4, 5: stage5, 6: stage6 })[STAGE]();
 // 放进原版海报的版式：整体缩小一点、团花中心放在 52% 高处，避开标题和底栏
-camera.zoom = +(Q.get('zoom') || ({ 2: 0.66, 6: 0.72 }[STAGE] || 0.78)); camera.setViewOffset(W, H, 0, -17, W, H); camera.updateProjectionMatrix();
+camera.zoom = +(Q.get('zoom') || (VERT && (STAGE === 4 || STAGE === 5) ? 0.7 : ({ 2: 0.66, 6: 0.72 }[STAGE] || 0.78))); camera.setViewOffset(W, H, 0, -17, W, H); camera.updateProjectionMatrix();
 
 // ---------- 画出来 ----------
 const g = new THREE.BufferGeometry();
