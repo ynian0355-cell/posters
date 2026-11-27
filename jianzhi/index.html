@@ -3,34 +3,52 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>掌中展开 · 数字剪纸</title>
+<title>数字剪纸 · 掌中展开 · A0</title>
 <style>
-  :root { --ink: #efe6da; --dim: #8f8274; --gold: #d6b07a; }
-  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; cursor: none; }
-  body { display: flex; align-items: center; justify-content: center; font-family: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", serif; }
-  #frame { position: relative; background: #040305; }
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  body { display: flex; align-items: center; justify-content: center; }
+  #frame { position: relative; background: rgb(6,6,9); }
   #frame canvas { display: block; width: 100%; height: 100%; }
-  .ui { position: absolute; color: var(--ink); pointer-events: none; transition: opacity .6s; }
-  #top { left: 6.5%; top: 4.6%; }
-  #top .eb { font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif; font-weight: 300; font-size: max(9px, 1.15vh); letter-spacing: .34em; color: var(--dim); }
-  #top h1 { margin: 1.1vh 0 0; font-weight: 600; font-size: 3.6vh; letter-spacing: .14em; }
-  #hint { left: 0; right: 0; bottom: 5.2%; text-align: center; font-size: 1.75vh; letter-spacing: .3em; color: var(--dim); opacity: 0; transition: opacity .5s, color .8s; }
-  #hint.strong { color: var(--gold); animation: breathe 2.4s ease-in-out infinite; }
-  @keyframes breathe { 50% { opacity: .55; } }
-  #cam { right: 6.5%; top: 4.9%; font-family: sans-serif; font-size: 1.1vh; letter-spacing: .2em; color: #b0453a; }
-  #corner { right: 6.5%; bottom: 2.4%; font-family: sans-serif; font-size: 1vh; letter-spacing: .24em; color: #4a4038; }
-  body.clean .ui { opacity: 0 !important; }
-  video { display: none; }
+  #ov { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .mono { font-family: Consolas, "Courier New", monospace; }
+  .cn { font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif; }
+  body.clean #ov { display: none; }
 </style>
 </head>
 <body>
 <div id="frame">
-  <div class="ui" id="top"><div class="eb">数字剪纸 · 非遗新生计划</div><h1>掌中展开</h1></div>
-  <div class="ui" id="cam"></div>
-  <div class="ui" id="hint"></div>
-  <div class="ui" id="corner">佛山剪纸 · 国家级非遗</div>
+<svg id="ov" viewBox="0 0 600 848" preserveAspectRatio="none">
+  <g stroke="#fff" stroke-opacity="0.035" stroke-width="1"><line x1="0" y1="0" x2="0" y2="848"/><line x1="25" y1="0" x2="25" y2="848"/><line x1="50" y1="0" x2="50" y2="848"/><line x1="75" y1="0" x2="75" y2="848"/><line x1="100" y1="0" x2="100" y2="848"/><line x1="125" y1="0" x2="125" y2="848"/><line x1="150" y1="0" x2="150" y2="848"/><line x1="175" y1="0" x2="175" y2="848"/><line x1="200" y1="0" x2="200" y2="848"/><line x1="225" y1="0" x2="225" y2="848"/><line x1="250" y1="0" x2="250" y2="848"/><line x1="275" y1="0" x2="275" y2="848"/><line x1="300" y1="0" x2="300" y2="848"/><line x1="325" y1="0" x2="325" y2="848"/><line x1="350" y1="0" x2="350" y2="848"/><line x1="375" y1="0" x2="375" y2="848"/><line x1="400" y1="0" x2="400" y2="848"/><line x1="425" y1="0" x2="425" y2="848"/><line x1="450" y1="0" x2="450" y2="848"/><line x1="475" y1="0" x2="475" y2="848"/><line x1="500" y1="0" x2="500" y2="848"/><line x1="525" y1="0" x2="525" y2="848"/><line x1="550" y1="0" x2="550" y2="848"/><line x1="575" y1="0" x2="575" y2="848"/><line x1="600" y1="0" x2="600" y2="848"/><line x1="0" y1="0" x2="600" y2="0"/><line x1="0" y1="25" x2="600" y2="25"/><line x1="0" y1="50" x2="600" y2="50"/><line x1="0" y1="75" x2="600" y2="75"/><line x1="0" y1="100" x2="600" y2="100"/><line x1="0" y1="125" x2="600" y2="125"/><line x1="0" y1="150" x2="600" y2="150"/><line x1="0" y1="175" x2="600" y2="175"/><line x1="0" y1="200" x2="600" y2="200"/><line x1="0" y1="225" x2="600" y2="225"/><line x1="0" y1="250" x2="600" y2="250"/><line x1="0" y1="275" x2="600" y2="275"/><line x1="0" y1="300" x2="600" y2="300"/><line x1="0" y1="325" x2="600" y2="325"/><line x1="0" y1="350" x2="600" y2="350"/><line x1="0" y1="375" x2="600" y2="375"/><line x1="0" y1="400" x2="600" y2="400"/><line x1="0" y1="425" x2="600" y2="425"/><line x1="0" y1="450" x2="600" y2="450"/><line x1="0" y1="475" x2="600" y2="475"/><line x1="0" y1="500" x2="600" y2="500"/><line x1="0" y1="525" x2="600" y2="525"/><line x1="0" y1="550" x2="600" y2="550"/><line x1="0" y1="575" x2="600" y2="575"/><line x1="0" y1="600" x2="600" y2="600"/><line x1="0" y1="625" x2="600" y2="625"/><line x1="0" y1="650" x2="600" y2="650"/><line x1="0" y1="675" x2="600" y2="675"/><line x1="0" y1="700" x2="600" y2="700"/><line x1="0" y1="725" x2="600" y2="725"/><line x1="0" y1="750" x2="600" y2="750"/><line x1="0" y1="775" x2="600" y2="775"/><line x1="0" y1="800" x2="600" y2="800"/><line x1="0" y1="825" x2="600" y2="825"/></g>
+  <text class="mono" x="32" y="30" font-size="10" fill="#fff" fill-opacity=".59">INTANGIBLE CULTURAL HERITAGE / NEW MEDIA</text>
+  <text class="mono" x="568" y="30" font-size="10" fill="#fff" fill-opacity=".59" text-anchor="end">NO.001 — 2026</text>
+  <line x1="32" y1="40" x2="568" y2="40" stroke="#fff" stroke-opacity=".35"/>
+  <text class="cn" x="28" y="106" font-size="44" font-weight="bold" fill="#f0f0f0">{ 数字剪纸 }</text>
+  <text class="cn" x="32" y="140" font-size="18" font-weight="bold" fill="#b6ff3c">非遗新生计划 · 掌中展开</text>
+  <text class="mono" x="32" y="170" font-size="11" fill="#fff" fill-opacity=".47">→ 创造者：胡奕君 + AI CREATE</text>
+  <text class="mono" x="32" y="188" font-size="11" fill="#fff" fill-opacity=".47">→ 制造日：2026/11/18</text>
+  <rect x="400" y="62" width="168" height="30" fill="#b6ff3c"/>
+  <text class="mono" x="410" y="83" font-size="16" font-weight="bold" fill="#060609">PAPER-CUT</text>
+  <rect x="400" y="92" width="168" height="20" fill="rgb(230,40,50)"/>
+  <text class="cn" x="410" y="107" font-size="11" font-weight="bold" fill="#fff">佛山剪纸 · 国家级非遗</text>
+  <text class="mono" transform="translate(586 240) rotate(90)" font-size="9" fill="#fff" fill-opacity=".35" xml:space="preserve">FOLD  ·  CUT  ·  UNFOLD  ·  12-FOLD SYMMETRY  —  001</text>
+  <line x1="32" y1="698" x2="568" y2="698" stroke="#fff" stroke-opacity=".35"/>
+  <text class="mono" x="32" y="722" font-size="10" fill="#fff" fill-opacity=".51">UNFOLD / 展开度</text>
+  <text id="uf" class="mono" x="32" y="766" font-size="40" font-weight="bold" fill="#f0f0f0">0.05</text>
+  <rect x="32" y="778" width="160" height="3" fill="#fff" fill-opacity=".16"/>
+  <rect id="ufbar" x="32" y="778" width="8" height="3" fill="#b6ff3c"/>
+  <text id="st" class="cn" x="32" y="804" font-size="12" font-weight="bold" fill="#c8c8c8">● 折叠 FOLDED</text>
+  <g class="cn" font-size="11" fill="#fff" fill-opacity=".67">
+    <text x="214" y="728">握紧的，是一张纸；</text><text x="214" y="748">张开的，是一门手艺。</text>
+    <text x="214" y="772">一折一剪藏在掌心，</text><text x="214" y="792">展开时，花才完整。</text>
+  </g>
+  <text class="mono" x="440" y="714" font-size="9" fill="#fff" fill-opacity=".51">CAM_01 / INPUT</text>
+  <foreignObject x="440" y="720" width="128" height="96"><video id="vid" playsinline muted xmlns="http://www.w3.org/1999/xhtml" style="width:128px;height:96px;object-fit:cover;transform:scaleX(-1);opacity:.47;display:block"></video></foreignObject>
+  <rect x="440" y="720" width="128" height="96" fill="none" stroke="#fff" stroke-opacity=".43"/>
+  <text id="cam" class="mono" x="504" y="772" font-size="9" fill="#fff" fill-opacity=".39" text-anchor="middle">NO CAMERA</text>
+  <text id="hint" class="cn" x="32" y="824" font-size="11" fill="rgb(255,120,120)"></text>
+  <text class="mono" x="568" y="824" font-size="9" fill="#fff" fill-opacity=".35" text-anchor="end">A0 · 841 × 1189 MM</text>
+</svg>
 </div>
-<video id="vid" playsinline muted></video>
 <script src="tuanhua.js"></script>
 <script src="app.js"></script>
 </body>

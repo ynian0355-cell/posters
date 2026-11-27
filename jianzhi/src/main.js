@@ -34,7 +34,7 @@ const CFG = {
 const Q = new URLSearchParams(location.search);
 const N = +(Q.get('n') || 100000);
 const ASPECT = 848 / 600;
-const SZ = 950, SEAL = 220, RR = 300, NS = 5, CAMZ = 2000, FOV = 38;
+const SZ = 780, SEAL = 200, RR = 260, NS = 5, CAMZ = 2000, FOV = 38;
 const VIS_H = 2 * CAMZ * Math.tan(FOV / 2 * Math.PI / 180), VIS_W = VIS_H / ASPECT;
 const SECT = Math.PI * 2 / 12;
 
@@ -54,13 +54,12 @@ const renderer = new THREE.WebGLRenderer({ antialias: false, preserveDrawingBuff
 renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
 frame.prepend(renderer.domElement);
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x040305);
+scene.background = new THREE.Color(0x060609);
 const camera = new THREE.PerspectiveCamera(FOV, 1 / ASPECT, 1, 20000);
 camera.position.set(0, 0, CAMZ);
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
 const bloom = new UnrealBloomPass(new THREE.Vector2(600, 848), 0.35, 0.7, 0.55);
-composer.addPass(bloom);
 composer.addPass(new OutputPass());
 let PX_H = 848;
 function fit() {
@@ -135,9 +134,9 @@ function makePoints() {
     uniforms: { k: { value: PX_H / 1000 } },
     vertexShader: `attribute float size, alpha; attribute vec3 color; uniform float k; varying vec3 vC; varying float vA;
       void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.); gl_Position = projectionMatrix * mv;
-        float ps = size * k * 1500. / -mv.z; gl_PointSize = max(ps, 1.0); vC = color; vA = alpha * min(1., ps * ps); }`,
+        float ps = size * 0.85 * k * 1500. / -mv.z; gl_PointSize = max(ps, 1.0); vC = color; vA = alpha * min(1., ps * ps); }`,
     fragmentShader: `varying vec3 vC; varying float vA;
-      void main(){ float d = length(gl_PointCoord - .5) * 2.; float a = exp(-d * d * 3.5) * vA * 3.4; if (a < 0.003) discard; gl_FragColor = vec4(vC, a); }`
+      void main(){ float d = length(gl_PointCoord - .5) * 2.; float a = smoothstep(1.0, 0.55, d) * vA * 2.0; if (a < 0.003) discard; gl_FragColor = vec4(vC, a); }`
   });
   points = new THREE.Points(g, pmat); points.frustumCulled = false; scene.add(points);
   // 手的 21 个关键点：一直淡淡地跟着你的手，让人知道"它看见我了"
@@ -159,7 +158,7 @@ const ROT0 = -SECT / 2;                                  // 折起来时，那�
 function polar(r, th, z) { const a = th + ROT0; return [Math.sin(a) * r * SZ / 2, Math.cos(a) * r * SZ / 2, z]; }
 function foldIndex(th) { return Math.floor(th / SECT); }
 function foldAngle(th) { const k = foldIndex(th), f = th - k * SECT; return k % 2 ? SECT - f : f; }   // 像折扇一样来回折
-function foldedTarget(i) { const th = SA[i], k = foldIndex(th), t = polar(SR[i] * 0.9, foldAngle(th), -k * 4); t[1] -= 260; return t; }   // 折起来的一小角，放在画面正中
+function foldedTarget(i) { const th = SA[i], k = foldIndex(th), t = polar(SR[i] * 0.9, foldAngle(th), 0); t[1] -= 210; return t; }   // 折起来的一小角，放在画面正中
 
 const S = {                                              // 整个作品此刻的状态
   mode: 'WAIT', t: 0,                                    // 当前招式、进入这一招多久
@@ -177,7 +176,7 @@ function target(i, out, T) {
     const br = 1 + 0.015 * Math.sin(T * 1.2);
     x *= br; y *= br;
     a *= m === 'CHARGE' ? 0.45 + 0.4 * S.charge : 0.32;
-    if (m === 'AWAKE' && S.hand && i % 4 === 0) {        // 01 觉醒：四分之一的粒子去描你的手
+    if (false) {        // 01 觉醒：四分之一的粒子去描你的手
       const hp = handPoint(i); if (hp) { x = hp[0]; y = hp[1]; z = hp[2]; a = BASEA[i] * 0.9; }
     }
   } else if (m === 'CHARGE') {                           // 02 蓄力：四层平面旋涡，往拳心旋
@@ -199,7 +198,7 @@ function target(i, out, T) {
     }
     if (m === 'BLOOM') { const br = 1 + 0.008 * Math.sin(T * 0.9); x *= br; y *= br; }
   } else if (m === 'SEAL' || m === 'GATHER') {
-    const back = () => { const t = polar(SR[i], SA[i], -1500); return [t[0] * 0.9, t[1] * 0.9, t[2]]; };
+    const back = () => { const t = polar(SR[i], SA[i], 0); return [t[0] * 0.5, t[1] * 0.5, 0]; };
     if (g < NS && (m === 'GATHER' || g < S.seals)) {     // 04 结印：这一朵已经飞来落位
       const ang = Math.PI / 2 - g / NS * Math.PI * 2, X = Math.cos(ang) * RR, Y = Math.sin(ang) * RR;
       const pulse = Math.exp(-S.sealT[g] * 5) * (S.sealT[g] < 2 ? 1 : 0);
@@ -221,7 +220,7 @@ function target(i, out, T) {
       z = (L - 2) * -130 * br;
     }
   }
-  out[0] = x; out[1] = y; out[2] = z; return a;
+  out[0] = x; out[1] = y; out[2] = 0; return a;              // 全部平面，不做前后
 }
 
 // 01 觉醒：手的骨头上取一个点（中线亮一点，两侧轮廓淡一点）
@@ -410,7 +409,7 @@ function demo(dt) {
   else if (key === 'HOLD') setMode('HOLD');
   else if (key === 'AWAKE') setMode('AWAKE');
   // 演示里的"幽灵手"：01 觉醒时画一只张开的手
-  S.hand = key === 'AWAKE' ? ghostHand() : null;
+  S.hand = null;
   G.hint = label ? '演示 · ' + label : '';
 }
 const HAND0 = [[0,0],[-45,40],[-85,90],[-115,135],[-140,175],[-45,170],[-55,240],[-60,285],[-63,322],[-5,178],[-5,258],[-5,308],[-5,348],[32,170],[38,240],[42,285],[45,320],[62,150],[75,205],[83,240],[90,272]];
@@ -435,7 +434,7 @@ function direct(dt) {
     const W = P.map(toWorld);
     const palmW = Math.hypot(W[9][0] - W[0][0], W[9][1] - W[0][1]);
     S.hand = W; S.handScale = palmW / 178;
-    for (let k = 0; k < 21; k++) { hp.setXYZ(k, W[k][0], W[k][1], 30); ha.setX(k, damp(ha.getX(k), 0.35, 6, dt)); }
+    for (let k = 0; k < 21; k++) { hp.setXYZ(k, W[k][0], W[k][1], 30); ha.setX(k, 0); }
   } else for (let k = 0; k < 21; k++) ha.setX(k, damp(ha.getX(k), 0, 4, dt));
   hp.needsUpdate = true; ha.needsUpdate = true;
 
@@ -459,18 +458,25 @@ function direct(dt) {
 const ui = { hint: document.getElementById('hint'), cam: document.getElementById('cam') };
 let T = 0, last = performance.now(), lastHint = null;
 function step(dt) {
-  T += dt; S.t += dt;
+  T += dt; S.t += dt; UF = damp(UF, unfold(), 4, dt);
   direct(dt);
-  const cx = S.mode === 'HOLD' ? 150 * Math.sin(T * 0.12) : S.mode === 'GATHER' ? 90 : S.mode === 'REVEAL' ? 70 : 0;
+  const cx = 0;
   S.camX = damp(S.camX, cx, 1.2, dt);
-  camera.position.set(S.camX, 0, CAMZ); camera.lookAt(S.camX, 0, 0);
+  camera.position.set(0, -27, CAMZ); camera.lookAt(0, -27, 0);   // 团花中心在海报 52% 高处（原版位置）
   physics(dt, T);
 }
+const STATUS = { WAIT: '● 折叠 FOLDED', AWAKE: '● 举手 READY', CHARGE: '● 蓄力 CHARGE', BURST: '● 展开中 UNFOLDING', BLOOM: '● 团花 FULL BLOOM', SEAL: '● 结印 SEAL', GATHER: '● 汇聚 GATHER', REVEAL: '● 显形 REVEAL', HOLD: '● 团花 FULL BLOOM' };
+function unfold() { const m = S.mode; return m === 'WAIT' || m === 'AWAKE' ? 0.05 : m === 'CHARGE' ? 0.05 + 0.1 * S.charge : m === 'BURST' ? S.open : m === 'REVEAL' ? 0.4 + 0.6 * S.reveal : 1; }
+let UF = 0.05;
 function drawUI() {
+  const set = (id, v) => { const e = document.getElementById(id); if (e && e.textContent !== v) e.textContent = v; };
+  set('uf', UF.toFixed(2)); const bar = document.getElementById('ufbar'); if (bar) bar.setAttribute('width', (160 * Math.min(1, UF)).toFixed(1));
+  set('st', (STATUS[S.mode] || '') + (S.mode === 'SEAL' ? ' ' + S.seals + '/5' : ''));
+  const st = document.getElementById('st'); if (st) st.setAttribute('fill', UF > 0.85 || S.mode === 'SEAL' ? '#b6ff3c' : '#c8c8c8');
   const h = G.hint;
-  if (h !== lastHint) { ui.hint.style.opacity = 0; setTimeout(() => { ui.hint.textContent = h; ui.hint.style.opacity = h ? 1 : 0; }, 260); lastHint = h; }
+  if (h !== lastHint) { ui.hint.textContent = h; lastHint = h; }
   ui.hint.classList.toggle('strong', !G.demo && G.hintStrong);
-  ui.cam.textContent = { on: G.demo ? '' : '●', loading: '识别加载中', fail: '识别没加载出来', denied: '没有摄像头权限', none: '没有摄像头' }[CAM.state] || '';
+  ui.cam.textContent = { on: '', loading: 'LOADING…', fail: 'NO MODEL', denied: 'NO CAMERA', none: 'NO CAMERA' }[CAM.state] ?? 'NO CAMERA';
 }
 function loop(now) {
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
